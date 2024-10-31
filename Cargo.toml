@@ -1,7 +1,7 @@
 [workspace]
 members = [
     "app",
-    "pcd-parser",
+    "pcd-*",
 ]
 resolver = "2"
 
