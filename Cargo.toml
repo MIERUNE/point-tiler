@@ -1,0 +1,18 @@
+[workspace]
+members = [
+    "app",
+    "pcd-parser",
+]
+resolver = "2"
+
+[workspace.package]
+version = "0.0.1"
+authors = ["MIERUNE Inc. <info@mierune.co.jp>"]
+
+[profile.dev.package."*"]
+opt-level = 3
+
+[profile.release-lto]
+inherits = "release"
+codegen-units = 8
+lto = "fat"

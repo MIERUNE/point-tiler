@@ -1,0 +1,8 @@
+[package]
+name = "app"
+edition = "2021"
+version.workspace = true
+authors.workspace = true
+
+[dependencies]
+pcd-parser = { path = "../pcd-parser" }
