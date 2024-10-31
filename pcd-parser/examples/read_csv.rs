@@ -4,7 +4,7 @@ use pcd_parser::parsers::{csv::CsvParserProvider, ParserProvider as _};
 
 fn main() {
     let provider = CsvParserProvider {
-        filenames: vec![PathBuf::from("examples/data/sample.txt")],
+        filenames: vec![PathBuf::from("pcd-parser/examples/data/sample.txt")],
     };
     let parser = provider.get_parser();
 

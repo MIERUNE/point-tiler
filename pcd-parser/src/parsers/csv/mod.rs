@@ -2,7 +2,7 @@ use std::{collections::HashMap, error::Error, path::PathBuf};
 
 use csv::ReaderBuilder;
 
-use crate::pointcloud::point::{Metadata, Point, PointAttributes, PointCloud};
+use pcd_core::pointcloud::point::{Metadata, Point, PointAttributes, PointCloud};
 
 use super::{Parser, ParserProvider};
 

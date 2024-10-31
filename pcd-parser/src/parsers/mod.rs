@@ -1,6 +1,6 @@
 use std::error::Error;
 
-use crate::pointcloud::point::PointCloud;
+use pcd_core::pointcloud::point::PointCloud;
 
 pub mod csv;
 pub mod las;

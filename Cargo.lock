@@ -662,16 +662,21 @@ dependencies = [
 ]
 
 [[package]]
+name = "pcd-core"
+version = "0.0.1"
+
+[[package]]
 name = "pcd-parser"
-version = "0.1.0"
+version = "0.0.1"
 dependencies = [
  "csv",
  "las",
+ "pcd-core",
 ]
 
 [[package]]
-name = "pcd-tiles"
-version = "0.1.0"
+name = "pcd-transformer"
+version = "0.0.1"
 
 [[package]]
 name = "percent-encoding"
