@@ -43,26 +43,6 @@ impl Parser for LasParser {
         for las_point in reader.points() {
             let las_point = las_point.unwrap();
 
-            let attributes = PointAttributes {
-                intensity: Some(las_point.intensity),
-                return_number: Some(las_point.return_number),
-                classification: Some(format!("{:?}", las_point.classification)),
-                scanner_channel: Some(las_point.user_data),
-                scan_angle: Some(las_point.scan_angle),
-                user_data: Some(las_point.user_data),
-                point_source_id: Some(las_point.point_source_id),
-                gps_time: Some(las_point.gps_time.unwrap_or(0.0)),
-                r: Some(las_point.color.map(|c| c.red).unwrap_or(0)),
-                g: Some(las_point.color.map(|c| c.green).unwrap_or(0)),
-                b: Some(las_point.color.map(|c| c.blue).unwrap_or(0)),
-            };
-
-            let point = Point {
-                x: las_point.x,
-                y: las_point.y,
-                z: las_point.z,
-                attributes,
-            };
             bounding_volume.max[0] = bounding_volume.max[0].max(las_point.x);
             bounding_volume.max[1] = bounding_volume.max[1].max(las_point.y);
             bounding_volume.max[2] = bounding_volume.max[2].max(las_point.z);
@@ -82,10 +62,7 @@ impl Parser for LasParser {
                     *digits = *digits.max(&mut fractional_part.len());
                 }
             }
-
-            points.push(point);
         }
-        println!("Build PointCloud time: {:?}", start.elapsed());
 
         let scale_x: f64 = format!("{:.*}", digits_x, 0.1_f64.powi(digits_x as i32)).parse()?;
         let scale_y: f64 = format!("{:.*}", digits_y, 0.1_f64.powi(digits_y as i32)).parse()?;
@@ -95,15 +72,55 @@ impl Parser for LasParser {
         let min_y = bounding_volume.min[1];
         let min_z = bounding_volume.min[2];
 
-        // todo: メタデータ取り込み部分を作る
+        let offset_x = min_x / scale_x;
+        let offset_y = min_y / scale_y;
+        let offset_z = min_z / scale_z;
+
         let metadata = Metadata {
             bounding_volume,
             coordinate_system_wkt: "PROJCS[\"JGD2011 / Japan Plane Rectangular CS VII\",...]"
                 .to_string(),
             scale: [scale_x, scale_y, scale_z],
-            offset: [min_x / scale_x, min_y / scale_y, min_z / scale_z],
+            offset: [offset_x, offset_y, offset_z],
             other: HashMap::new(),
         };
+
+        println!("Calc bounding_volume time: {:?}", start.elapsed());
+
+        let start = std::time::Instant::now();
+        // TODO: 1度目のループで消費されてしまうので、再度読み込みを行っているが、改修が必要
+        let mut reader = Reader::from_path(&self.filenames[0]).unwrap();
+        for las_point in reader.points() {
+            let las_point = las_point.unwrap();
+
+            let x = las_point.x;
+            let y = las_point.y;
+            let z = las_point.z;
+
+            let attributes = PointAttributes {
+                intensity: Some(las_point.intensity),
+                return_number: Some(las_point.return_number),
+                classification: Some(format!("{:?}", las_point.classification)),
+                scanner_channel: Some(las_point.user_data),
+                scan_angle: Some(las_point.scan_angle),
+                user_data: Some(las_point.user_data),
+                point_source_id: Some(las_point.point_source_id),
+                gps_time: Some(las_point.gps_time.unwrap_or(0.0)),
+                r: Some(las_point.color.map(|c| c.red).unwrap_or(0)),
+                g: Some(las_point.color.map(|c| c.green).unwrap_or(0)),
+                b: Some(las_point.color.map(|c| c.blue).unwrap_or(0)),
+            };
+
+            let point = Point {
+                x: ((x * scale_x) + offset_x) as i32,
+                y: ((y * scale_y) + offset_y) as i32,
+                z: ((z * scale_z) + offset_z) as i32,
+                attributes,
+            };
+
+            points.push(point);
+        }
+        println!("Build PointCloud time: {:?}", start.elapsed());
 
         Ok(PointCloud { points, metadata })
     }
