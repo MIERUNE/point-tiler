@@ -17,9 +17,9 @@ pub struct PointAttributes {
 
 #[derive(Debug, Clone)]
 pub struct Point {
-    pub x: f64,
-    pub y: f64,
-    pub z: f64,
+    pub x: i32,
+    pub y: i32,
+    pub z: i32,
     pub attributes: PointAttributes,
 }
 
