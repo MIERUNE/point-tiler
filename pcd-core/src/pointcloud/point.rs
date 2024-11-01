@@ -29,12 +29,17 @@ pub struct PointCloud {
     pub metadata: Metadata,
 }
 
+#[derive(Debug, Clone, Default)]
+pub struct BoundingVolume {
+    pub min: [f64; 3],
+    pub max: [f64; 3],
+}
+
 #[derive(Debug, Clone)]
 pub struct Metadata {
+    pub bounding_volume: BoundingVolume,
     pub coordinate_system_wkt: String,
     pub scale: [f64; 3],
     pub offset: [f64; 3],
-    pub max_xyz: [f64; 3],
-    pub min_xyz: [f64; 3],
     pub other: HashMap<String, String>,
 }

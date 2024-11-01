@@ -2,7 +2,7 @@ use std::{collections::HashMap, error::Error, path::PathBuf};
 
 use las::Reader;
 
-use pcd_core::pointcloud::point::{Metadata, Point, PointAttributes, PointCloud};
+use pcd_core::pointcloud::point::{BoundingVolume, Metadata, Point, PointAttributes, PointCloud};
 
 use super::{Parser, ParserProvider};
 
@@ -29,6 +29,10 @@ impl Parser for LasParser {
         println!("Read LAS time: {:?}", start.elapsed());
 
         let mut points = Vec::new();
+        let mut bounding_volume = BoundingVolume {
+            min: [f64::MAX, f64::MAX, f64::MAX],
+            max: [f64::MIN, f64::MIN, f64::MIN],
+        };
 
         let start = std::time::Instant::now();
         for las_point in reader.points() {
@@ -54,6 +58,12 @@ impl Parser for LasParser {
                 z: las_point.z,
                 attributes,
             };
+            bounding_volume.max[0] = bounding_volume.max[0].max(las_point.x);
+            bounding_volume.max[1] = bounding_volume.max[1].max(las_point.y);
+            bounding_volume.max[2] = bounding_volume.max[2].max(las_point.z);
+            bounding_volume.min[0] = bounding_volume.min[0].min(las_point.x);
+            bounding_volume.min[1] = bounding_volume.min[1].min(las_point.y);
+            bounding_volume.min[2] = bounding_volume.min[2].min(las_point.z);
 
             points.push(point);
         }
@@ -61,12 +71,11 @@ impl Parser for LasParser {
 
         // todo: メタデータ取り込み部分を作る
         let metadata = Metadata {
+            bounding_volume,
             coordinate_system_wkt: "PROJCS[\"JGD2011 / Japan Plane Rectangular CS VII\",...]"
                 .to_string(),
             scale: [0.001, 0.001, 0.001],
             offset: [0.0, 0.0, 0.0],
-            max_xyz: [10000.0, 20000.0, 500.0],
-            min_xyz: [0.0, 0.0, 0.0],
             other: HashMap::new(),
         };
 
