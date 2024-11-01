@@ -22,6 +22,8 @@ pub struct LasParser {
     pub filenames: Vec<PathBuf>,
 }
 
+pub static SCALE_FACTOR: f64 = 0.001;
+
 impl Parser for LasParser {
     fn parse(&self) -> Result<PointCloud, Box<dyn Error>> {
         let start = std::time::Instant::now();
@@ -33,6 +35,9 @@ impl Parser for LasParser {
             min: [f64::MAX, f64::MAX, f64::MAX],
             max: [f64::MIN, f64::MIN, f64::MIN],
         };
+        let mut digits_x = 3;
+        let mut digits_y = 3;
+        let mut digits_z = 3;
 
         let start = std::time::Instant::now();
         for las_point in reader.points() {
@@ -65,17 +70,38 @@ impl Parser for LasParser {
             bounding_volume.min[1] = bounding_volume.min[1].min(las_point.y);
             bounding_volume.min[2] = bounding_volume.min[2].min(las_point.z);
 
+            for (value, digits) in [
+                (las_point.x, &mut digits_x),
+                (las_point.y, &mut digits_y),
+                (las_point.z, &mut digits_z),
+            ] {
+                let value_str = format!("{:.7}", value);
+                if let Some(dot_index) = value_str.find('.') {
+                    let fractional_part = &value_str[dot_index + 1..];
+                    let fractional_part = fractional_part.trim_end_matches('0');
+                    *digits = *digits.max(&mut fractional_part.len());
+                }
+            }
+
             points.push(point);
         }
         println!("Build PointCloud time: {:?}", start.elapsed());
+
+        let scale_x: f64 = format!("{:.*}", digits_x, 0.1_f64.powi(digits_x as i32)).parse()?;
+        let scale_y: f64 = format!("{:.*}", digits_y, 0.1_f64.powi(digits_y as i32)).parse()?;
+        let scale_z: f64 = format!("{:.*}", digits_z, 0.1_f64.powi(digits_z as i32)).parse()?;
+
+        let min_x = bounding_volume.min[0];
+        let min_y = bounding_volume.min[1];
+        let min_z = bounding_volume.min[2];
 
         // todo: メタデータ取り込み部分を作る
         let metadata = Metadata {
             bounding_volume,
             coordinate_system_wkt: "PROJCS[\"JGD2011 / Japan Plane Rectangular CS VII\",...]"
                 .to_string(),
-            scale: [0.001, 0.001, 0.001],
-            offset: [0.0, 0.0, 0.0],
+            scale: [scale_x, scale_y, scale_z],
+            offset: [min_x / scale_x, min_y / scale_y, min_z / scale_z],
             other: HashMap::new(),
         };
 
