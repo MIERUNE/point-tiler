@@ -16,4 +16,8 @@ fn main() {
     );
 
     println!("First point: {:?}", point_cloud.as_ref().unwrap().points[0]);
+    println!(
+        "PointCloud metadata: {:?}",
+        point_cloud.as_ref().unwrap().metadata
+    );
 }

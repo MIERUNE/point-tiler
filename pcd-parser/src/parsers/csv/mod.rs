@@ -2,7 +2,7 @@ use std::{collections::HashMap, error::Error, path::PathBuf};
 
 use csv::ReaderBuilder;
 
-use pcd_core::pointcloud::point::{Metadata, Point, PointAttributes, PointCloud};
+use pcd_core::pointcloud::point::{BoundingVolume, Metadata, Point, PointAttributes, PointCloud};
 
 use super::{Parser, ParserProvider};
 
@@ -34,9 +34,13 @@ impl Parser for CsvParser {
         let headers = reader.headers().unwrap();
         let has_headers = !headers.iter().all(|h| h.trim().is_empty());
 
-        let field_mapping = create_field_mapping(&headers, has_headers).unwrap();
+        let field_mapping = create_field_mapping(headers, has_headers).unwrap();
 
         let mut points = Vec::new();
+        let mut bounding_volume = BoundingVolume {
+            min: [f64::MAX, f64::MAX, f64::MAX],
+            max: [f64::MIN, f64::MIN, f64::MIN],
+        };
 
         let start = std::time::Instant::now();
         for record in reader.records() {
@@ -77,13 +81,19 @@ impl Parser for CsvParser {
                 z,
                 attributes,
             };
+            bounding_volume.max[0] = bounding_volume.max[0].max(x);
+            bounding_volume.max[1] = bounding_volume.max[1].max(y);
+            bounding_volume.max[2] = bounding_volume.max[2].max(z);
+            bounding_volume.min[0] = bounding_volume.min[0].min(x);
+            bounding_volume.min[1] = bounding_volume.min[1].min(y);
+            bounding_volume.min[2] = bounding_volume.min[2].min(z);
 
             points.push(point);
         }
 
         // todo: メタデータ取り込み部分を作る
         let metadata = Metadata {
-            bounding_volume: Default::default(),
+            bounding_volume,
             coordinate_system_wkt: "PROJCS[\"JGD2011 / Japan Plane Rectangular CS VII\",...]"
                 .to_string(),
             scale: [0.001, 0.001, 0.001],
