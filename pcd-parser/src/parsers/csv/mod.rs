@@ -83,12 +83,11 @@ impl Parser for CsvParser {
 
         // todo: メタデータ取り込み部分を作る
         let metadata = Metadata {
+            bounding_volume: Default::default(),
             coordinate_system_wkt: "PROJCS[\"JGD2011 / Japan Plane Rectangular CS VII\",...]"
                 .to_string(),
             scale: [0.001, 0.001, 0.001],
             offset: [0.0, 0.0, 0.0],
-            max_xyz: [10000.0, 20000.0, 500.0],
-            min_xyz: [0.0, 0.0, 0.0],
             other: HashMap::new(),
         };
 
