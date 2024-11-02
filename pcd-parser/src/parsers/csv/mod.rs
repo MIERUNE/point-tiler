@@ -46,6 +46,8 @@ impl Parser for CsvParser {
         let mut digits_y = 3;
         let mut digits_z = 3;
 
+        let mut point_count = 0;
+
         let start = std::time::Instant::now();
         for record in reader.records() {
             let record: csv::StringRecord = record.unwrap();
@@ -79,6 +81,8 @@ impl Parser for CsvParser {
                     *digits = *digits.max(&mut fractional_part.len());
                 }
             }
+
+            point_count += 1;
         }
 
         let scale_x: f64 = format!("{:.*}", digits_x, 0.1_f64.powi(digits_x as i32)).parse()?;
@@ -94,6 +98,7 @@ impl Parser for CsvParser {
         let offset_z = min_z / scale_z;
 
         let metadata = Metadata {
+            point_count,
             bounding_volume,
             coordinate_system_wkt: "PROJCS[\"JGD2011 / Japan Plane Rectangular CS VII\",...]"
                 .to_string(),
