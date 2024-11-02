@@ -37,6 +37,7 @@ pub struct BoundingVolume {
 
 #[derive(Debug, Clone)]
 pub struct Metadata {
+    pub point_count: usize,
     pub bounding_volume: BoundingVolume,
     pub coordinate_system_wkt: String,
     pub scale: [f64; 3],
