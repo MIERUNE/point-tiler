@@ -818,6 +818,9 @@ dependencies = [
  "cesiumtiles-gltf",
  "cesiumtiles-gltf-json",
  "pcd-core",
+ "pcd-parser",
+ "serde",
+ "serde_json",
 ]
 
 [[package]]
