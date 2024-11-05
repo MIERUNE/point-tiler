@@ -7,7 +7,7 @@ use std::{
     vec,
 };
 
-use nusamai_gltf_json::*;
+use cesiumtiles_gltf_json::*;
 
 fn main() -> io::Result<()> {
     let mut gltf = Gltf {

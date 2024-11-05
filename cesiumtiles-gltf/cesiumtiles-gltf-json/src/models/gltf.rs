@@ -102,6 +102,6 @@ mod tests {
     fn gltf_default() {
         let gltf = Gltf::default();
         assert_eq!(gltf.asset.version, "2.0");
-        assert_eq!(gltf.asset.generator, Some("nusamai-gltf".into()));
+        assert_eq!(gltf.asset.generator, Some("cesiumtiles-gltf".into()));
     }
 }

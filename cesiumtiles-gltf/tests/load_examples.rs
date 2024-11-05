@@ -1,11 +1,11 @@
 use std::{fs::File, io::BufReader};
 
-use nusamai_gltf::glb::Glb;
-use nusamai_gltf_json::*;
+use cesiumtiles_gltf::glb::Glb;
+use cesiumtiles_gltf_json::*;
 
 #[test]
 fn load_glb_examples() {
-    for path in glob::glob("./nusamai-gltf-json/tests/samples/2.0/*.glb").unwrap() {
+    for path in glob::glob("./cesiumtiles-gltf-json/tests/samples/2.0/*.glb").unwrap() {
         let path = path.unwrap();
         println!("loading {:?}", path);
 
@@ -32,7 +32,7 @@ fn load_glb_examples() {
 
 #[test]
 fn load_3dtiles_glb_examples() {
-    for path in glob::glob("./nusamai-gltf-json/tests/samples/3d-tiles/**/*.glb").unwrap() {
+    for path in glob::glob("./cesiumtiles-gltf-json/tests/samples/3d-tiles/**/*.glb").unwrap() {
         let path = path.unwrap();
         println!("loading {:?}", path);
 

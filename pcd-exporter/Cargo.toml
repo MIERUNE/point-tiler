@@ -1,6 +1,9 @@
 [package]
-name = "pcd-tiler"
+name = "pcd-exporter"
 version.workspace = true
 edition = "2021"
 
 [dependencies]
+pcd-core = { path = "../pcd-core" }
+cesiumtiles-gltf = { path = "../cesiumtiles-gltf" }
+cesiumtiles-gltf-json = { path = "../cesiumtiles-gltf/cesiumtiles-gltf-json" }

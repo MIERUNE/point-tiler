@@ -43,7 +43,7 @@ impl Default for Asset {
     fn default() -> Self {
         Self {
             copyright: Default::default(),
-            generator: Some("nusamai-gltf".to_string()),
+            generator: Some("cesiumtiles-gltf".to_string()),
             version: "2.0".into(),
             min_version: Default::default(),
             extensions: Default::default(),

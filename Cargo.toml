@@ -2,6 +2,7 @@
 members = [
     "app",
     "pcd-*",
+    "cesiumtiles-gltf"
 ]
 resolver = "2"
 
