@@ -10,9 +10,13 @@ pub struct PointAttributes {
     pub user_data: Option<u8>,
     pub point_source_id: Option<u16>,
     pub gps_time: Option<f64>,
-    pub r: Option<u16>,
-    pub g: Option<u16>,
-    pub b: Option<u16>,
+}
+
+#[derive(Debug, Clone)]
+pub struct Color {
+    pub r: u16,
+    pub g: u16,
+    pub b: u16,
 }
 
 #[derive(Debug, Clone)]
@@ -20,6 +24,7 @@ pub struct Point {
     pub x: i32,
     pub y: i32,
     pub z: i32,
+    pub color: Color,
     pub attributes: PointAttributes,
 }
 

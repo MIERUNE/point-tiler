@@ -2,7 +2,9 @@ use std::{collections::HashMap, error::Error, path::PathBuf};
 
 use las::Reader;
 
-use pcd_core::pointcloud::point::{BoundingVolume, Metadata, Point, PointAttributes, PointCloud};
+use pcd_core::pointcloud::point::{
+    BoundingVolume, Color, Metadata, Point, PointAttributes, PointCloud,
+};
 
 use super::{Parser, ParserProvider};
 
@@ -102,6 +104,12 @@ impl Parser for LasParser {
             let y = las_point.y;
             let z = las_point.z;
 
+            let color = las_point.color.map(|c| Color {
+                r: c.red,
+                g: c.green,
+                b: c.blue,
+            });
+
             let attributes = PointAttributes {
                 intensity: Some(las_point.intensity),
                 return_number: Some(las_point.return_number),
@@ -111,15 +119,13 @@ impl Parser for LasParser {
                 user_data: Some(las_point.user_data),
                 point_source_id: Some(las_point.point_source_id),
                 gps_time: Some(las_point.gps_time.unwrap_or(0.0)),
-                r: Some(las_point.color.map(|c| c.red).unwrap_or(0)),
-                g: Some(las_point.color.map(|c| c.green).unwrap_or(0)),
-                b: Some(las_point.color.map(|c| c.blue).unwrap_or(0)),
             };
 
             let point = Point {
                 x: ((x * scale_x) + offset_x) as i32,
                 y: ((y * scale_y) + offset_y) as i32,
                 z: ((z * scale_z) + offset_z) as i32,
+                color: color.unwrap_or(Color { r: 0, g: 0, b: 0 }),
                 attributes,
             };
 

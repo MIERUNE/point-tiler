@@ -2,7 +2,9 @@ use std::{collections::HashMap, error::Error, path::PathBuf};
 
 use csv::ReaderBuilder;
 
-use pcd_core::pointcloud::point::{BoundingVolume, Metadata, Point, PointAttributes, PointCloud};
+use pcd_core::pointcloud::point::{
+    BoundingVolume, Color, Metadata, Point, PointAttributes, PointCloud,
+};
 
 use super::{Parser, ParserProvider};
 
@@ -132,6 +134,12 @@ impl Parser for CsvParser {
                 .parse()
                 .map_err(|e| format!("Failed to parse 'z': {}", e))?;
 
+            let color = Color {
+                r: parse_optional_field(&record, &field_mapping, "r")?.unwrap_or(0),
+                g: parse_optional_field(&record, &field_mapping, "g")?.unwrap_or(0),
+                b: parse_optional_field(&record, &field_mapping, "b")?.unwrap_or(0),
+            };
+
             let attributes = PointAttributes {
                 intensity: parse_optional_field(&record, &field_mapping, "intensity")?,
                 return_number: parse_optional_field(&record, &field_mapping, "return_number")?,
@@ -142,15 +150,13 @@ impl Parser for CsvParser {
                 user_data: parse_optional_field(&record, &field_mapping, "user_data")?,
                 point_source_id: parse_optional_field(&record, &field_mapping, "point_source_id")?,
                 gps_time: parse_optional_field(&record, &field_mapping, "gps_time")?,
-                r: parse_optional_field(&record, &field_mapping, "r")?,
-                g: parse_optional_field(&record, &field_mapping, "g")?,
-                b: parse_optional_field(&record, &field_mapping, "b")?,
             };
 
             let point = Point {
                 x: ((x * scale_x) + offset_x) as i32,
                 y: ((y * scale_y) + offset_y) as i32,
                 z: ((z * scale_z) + offset_z) as i32,
+                color,
                 attributes,
             };
 
