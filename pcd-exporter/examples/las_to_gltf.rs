@@ -1,11 +1,11 @@
-use std::path::PathBuf;
+use std::{io::Write as _, path::PathBuf};
 
-use pcd_exporter::gltf::write_gltf;
+use pcd_exporter::gltf::write_glb;
 use pcd_parser::parsers::{las::LasParserProvider, ParserProvider as _};
 
 fn main() {
     let provider = LasParserProvider {
-        filenames: vec![PathBuf::from("pcd-parser/examples/data/sample.las")],
+        filenames: vec![PathBuf::from("pcd-exporter/examples/data/sample.las")],
     };
     let parser = provider.get_parser();
 
@@ -22,6 +22,15 @@ fn main() {
         point_cloud.as_ref().unwrap().metadata
     );
 
-    let writer = std::fs::File::create("pcd-parser/examples/data/output.glb").unwrap();
-    let _ = write_gltf(writer, &point_cloud.unwrap());
+    let glb_path = "pcd-exporter/examples/data/output/sample.glb";
+    std::fs::create_dir_all(std::path::Path::new(glb_path).parent().unwrap()).unwrap();
+
+    let writer = std::fs::File::create(glb_path).unwrap();
+    let (gltf, _) = write_glb(writer, &point_cloud.unwrap()).unwrap();
+
+    let gltf_path = "pcd-exporter/examples/data/output/sample.gltf";
+    let mut gltf_writer = std::fs::File::create(gltf_path).unwrap();
+    gltf_writer
+        .write_all(serde_json::to_string_pretty(&gltf).unwrap().as_bytes())
+        .unwrap();
 }

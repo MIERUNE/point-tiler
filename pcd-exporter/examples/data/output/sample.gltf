@@ -1,0 +1,51 @@
+{
+  "accessors": [
+    {
+      "name": "positions",
+      "bufferView": 0,
+      "componentType": 5126,
+      "count": 5,
+      "type": "VEC3",
+      "max": [
+        -19000.0,
+        -59357.9,
+        13.8
+      ],
+      "min": [
+        -19000.0,
+        -59937.56,
+        2.22
+      ]
+    }
+  ],
+  "asset": {
+    "generator": "cesiumtiles-gltf",
+    "version": "2.0"
+  },
+  "bufferViews": [
+    {
+      "name": "vertices",
+      "buffer": 0,
+      "byteLength": 100,
+      "byteStride": 12,
+      "target": 34962
+    }
+  ],
+  "buffers": [
+    {
+      "byteLength": 100
+    }
+  ],
+  "nodes": [
+    {
+      "mesh": 0
+    }
+  ],
+  "scenes": [
+    {
+      "nodes": [
+        0
+      ]
+    }
+  ]
+}

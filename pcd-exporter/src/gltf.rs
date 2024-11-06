@@ -5,7 +5,10 @@ use cesiumtiles_gltf_json::{
 };
 use pcd_core::pointcloud::point::PointCloud;
 
-pub fn write_gltf<W: Write>(writer: W, points: &PointCloud) -> Result<(), Box<dyn Error>> {
+pub fn write_glb<W: Write>(
+    writer: W,
+    points: &PointCloud,
+) -> Result<(Gltf, Vec<u8>), Box<dyn Error>> {
     let mut bin_content: Vec<u8> = Vec::new();
     let mut gltf_buffer_views = Vec::new();
     let mut gltf_accessors = Vec::new();
@@ -84,9 +87,9 @@ pub fn write_gltf<W: Write>(writer: W, points: &PointCloud) -> Result<(), Box<dy
 
     cesiumtiles_gltf::glb::Glb {
         json: serde_json::to_vec(&gltf).unwrap().into(),
-        bin: Some(bin_content.into()),
+        bin: Some(bin_content.clone().into()),
     }
     .to_writer_with_alignment(writer, 8)?;
 
-    Ok(())
+    Ok((gltf, bin_content))
 }
