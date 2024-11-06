@@ -815,6 +815,7 @@ version = "0.0.1"
 name = "pcd-exporter"
 version = "0.0.1"
 dependencies = [
+ "byteorder",
  "cesiumtiles-gltf",
  "cesiumtiles-gltf-json",
  "pcd-core",
