@@ -1,7 +1,8 @@
-use std::{error::Error, io::Write};
+use std::{collections::HashMap, error::Error, io::Write};
 
 use cesiumtiles_gltf_json::{
-    Accessor, AccessorType, Buffer, BufferView, BufferViewTarget, ComponentType, Gltf, Node, Scene,
+    Accessor, AccessorType, Buffer, BufferView, BufferViewTarget, ComponentType, Gltf, Mesh,
+    MeshPrimitive, Node, Scene,
 };
 use pcd_core::pointcloud::point::PointCloud;
 
@@ -59,6 +60,15 @@ pub fn write_glb<W: Write>(
         ..Default::default()
     });
 
+    let gltf_meshes = vec![Mesh {
+        primitives: vec![MeshPrimitive {
+            attributes: HashMap::from_iter(vec![("POSITION".to_string(), 0)]),
+            mode: cesiumtiles_gltf_json::PrimitiveMode::Points,
+            ..Default::default()
+        }],
+        ..Default::default()
+    }];
+
     let gltf_buffers = {
         let mut buffers = vec![];
         if !bin_content.is_empty() {
@@ -79,6 +89,7 @@ pub fn write_glb<W: Write>(
             mesh: Some(0),
             ..Default::default()
         }],
+        meshes: gltf_meshes,
         accessors: gltf_accessors,
         buffer_views: gltf_buffer_views,
         buffers: gltf_buffers,
