@@ -7,15 +7,23 @@
       "count": 5,
       "type": "VEC3",
       "max": [
-        -19000.0,
-        -59357.9,
-        13.8
+        -19000,
+        -59357.91015625,
+        13.800000190734863
       ],
       "min": [
-        -19000.0,
-        -59937.56,
-        2.22
+        -19000,
+        -59937.55859375,
+        2.2200000286102295
       ]
+    },
+    {
+      "name": "colors",
+      "bufferView": 0,
+      "byteOffset": 12,
+      "componentType": 5125,
+      "count": 5,
+      "type": "VEC3"
     }
   ],
   "asset": {
@@ -26,19 +34,43 @@
     {
       "name": "vertices",
       "buffer": 0,
-      "byteLength": 100,
-      "byteStride": 12,
-      "target": 34962
+      "byteLength": 120,
+      "byteStride": 24,
+      "target": 34962,
+      "byteOffset": 0
     }
   ],
   "buffers": [
     {
-      "byteLength": 100
+      "uri": "sample_data.bin",
+      "byteLength": 120
+    }
+  ],
+  "meshes": [
+    {
+      "primitives": [
+        {
+          "attributes": {
+            "POSITION": 0
+          },
+          "mode": 0
+        }
+      ]
     }
   ],
   "nodes": [
     {
-      "mesh": 0
+      "mesh": 0,
+      "scale": [
+        0.01,
+        0.01,
+        0.01
+      ],
+      "translation": [
+        -19000,
+        -59937.56,
+        2.22
+      ]
     }
   ],
   "scenes": [
