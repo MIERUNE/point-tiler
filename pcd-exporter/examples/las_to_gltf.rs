@@ -4,9 +4,10 @@ use pcd_exporter::gltf::write_glb;
 use pcd_parser::parsers::{las::LasParserProvider, ParserProvider as _};
 
 fn main() {
-    let provider = LasParserProvider {
+    let las_parser_provider = LasParserProvider {
         filenames: vec![PathBuf::from("pcd-exporter/examples/data/sample.las")],
     };
+    let provider = las_parser_provider;
     let parser = provider.get_parser();
 
     let point_cloud = parser.parse();

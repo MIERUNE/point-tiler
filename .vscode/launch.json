@@ -1,0 +1,18 @@
+{
+	"version": "0.2.0",
+	"configurations": [
+        {
+            "type": "lldb",
+            "request": "launch",
+            "name": "Debug executable 'main'",
+            "program": "${workspaceFolder}/target/release/examples/las_to_gltf",
+            "cargo": {
+                "args": ["build", "--release", "--package", "pcd-exporter", "--example", "las_to_gltf"],
+                "filter": {
+                    "name": "las_to_gltf",
+                },
+            },
+            "cwd": "${workspaceFolder}",
+        }
+	]
+}
