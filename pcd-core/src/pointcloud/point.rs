@@ -19,11 +19,14 @@ pub struct Color {
     pub b: u16,
 }
 
+// The coordinates are expressed in i32 format
+// The actual coordinates are calculated as follows, based on the combination of scale and offset
+// x = (x * scale[0]) + offset[0]
 #[derive(Debug, Clone)]
 pub struct Point {
-    pub x: i32,
-    pub y: i32,
-    pub z: i32,
+    pub x: u32,
+    pub y: u32,
+    pub z: u32,
     pub color: Color,
     pub attributes: PointAttributes,
 }
@@ -34,6 +37,7 @@ pub struct PointCloud {
     pub metadata: Metadata,
 }
 
+// This represents the maximum and minimum values of the original coordinate values obtained by combining the scale and offset.
 #[derive(Debug, Clone, Default)]
 pub struct BoundingVolume {
     pub min: [f64; 3],

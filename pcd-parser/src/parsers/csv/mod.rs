@@ -51,40 +51,46 @@ impl Parser for CsvParser {
         let mut point_count = 0;
 
         let start = std::time::Instant::now();
-        for record in reader.records() {
-            let record: csv::StringRecord = record.unwrap();
+        {
+            for record in reader.records() {
+                let record: csv::StringRecord = record.unwrap();
 
-            let x_str = get_field_value(&record, &field_mapping, "x").ok_or("Missing 'x' field")?;
-            let y_str = get_field_value(&record, &field_mapping, "y").ok_or("Missing 'y' field")?;
-            let z_str = get_field_value(&record, &field_mapping, "z").ok_or("Missing 'z' field")?;
+                let x_str =
+                    get_field_value(&record, &field_mapping, "x").ok_or("Missing 'x' field")?;
+                let y_str =
+                    get_field_value(&record, &field_mapping, "y").ok_or("Missing 'y' field")?;
+                let z_str =
+                    get_field_value(&record, &field_mapping, "z").ok_or("Missing 'z' field")?;
 
-            let x: f64 = x_str
-                .parse()
-                .map_err(|e| format!("Failed to parse 'x': {}", e))?;
-            let y: f64 = y_str
-                .parse()
-                .map_err(|e| format!("Failed to parse 'y': {}", e))?;
-            let z: f64 = z_str
-                .parse()
-                .map_err(|e| format!("Failed to parse 'z': {}", e))?;
+                let x: f64 = x_str
+                    .parse()
+                    .map_err(|e| format!("Failed to parse 'x': {}", e))?;
+                let y: f64 = y_str
+                    .parse()
+                    .map_err(|e| format!("Failed to parse 'y': {}", e))?;
+                let z: f64 = z_str
+                    .parse()
+                    .map_err(|e| format!("Failed to parse 'z': {}", e))?;
 
-            bounding_volume.max[0] = bounding_volume.max[0].max(x);
-            bounding_volume.max[1] = bounding_volume.max[1].max(y);
-            bounding_volume.max[2] = bounding_volume.max[2].max(z);
-            bounding_volume.min[0] = bounding_volume.min[0].min(x);
-            bounding_volume.min[1] = bounding_volume.min[1].min(y);
-            bounding_volume.min[2] = bounding_volume.min[2].min(z);
+                bounding_volume.max[0] = bounding_volume.max[0].max(x);
+                bounding_volume.max[1] = bounding_volume.max[1].max(y);
+                bounding_volume.max[2] = bounding_volume.max[2].max(z);
+                bounding_volume.min[0] = bounding_volume.min[0].min(x);
+                bounding_volume.min[1] = bounding_volume.min[1].min(y);
+                bounding_volume.min[2] = bounding_volume.min[2].min(z);
 
-            for (value, digits) in [(x, &mut digits_x), (y, &mut digits_y), (z, &mut digits_z)] {
-                let value_str = format!("{:.7}", value);
-                if let Some(dot_index) = value_str.find('.') {
-                    let fractional_part = &value_str[dot_index + 1..];
-                    let fractional_part = fractional_part.trim_end_matches('0');
-                    *digits = *digits.max(&mut fractional_part.len());
+                for (value, digits) in [(x, &mut digits_x), (y, &mut digits_y), (z, &mut digits_z)]
+                {
+                    let value_str = format!("{:.7}", value);
+                    if let Some(dot_index) = value_str.find('.') {
+                        let fractional_part = &value_str[dot_index + 1..];
+                        let fractional_part = fractional_part.trim_end_matches('0');
+                        *digits = *digits.max(&mut fractional_part.len());
+                    }
                 }
-            }
 
-            point_count += 1;
+                point_count += 1;
+            }
         }
 
         let scale_x: f64 = format!("{:.*}", digits_x, 0.1_f64.powi(digits_x as i32)).parse()?;
@@ -95,9 +101,9 @@ impl Parser for CsvParser {
         let min_y = bounding_volume.min[1];
         let min_z = bounding_volume.min[2];
 
-        let offset_x = min_x / scale_x;
-        let offset_y = min_y / scale_y;
-        let offset_z = min_z / scale_z;
+        let offset_x = min_x;
+        let offset_y = min_y;
+        let offset_z = min_z;
 
         let metadata = Metadata {
             point_count,
@@ -117,50 +123,63 @@ impl Parser for CsvParser {
             .from_path(&self.filenames[0])
             .unwrap();
         let mut points = Vec::new();
-        for record in reader.records() {
-            let record: csv::StringRecord = record.unwrap();
+        {
+            for record in reader.records() {
+                let record: csv::StringRecord = record.unwrap();
 
-            let x_str = get_field_value(&record, &field_mapping, "x").ok_or("Missing 'x' field")?;
-            let y_str = get_field_value(&record, &field_mapping, "y").ok_or("Missing 'y' field")?;
-            let z_str = get_field_value(&record, &field_mapping, "z").ok_or("Missing 'z' field")?;
+                let x_str =
+                    get_field_value(&record, &field_mapping, "x").ok_or("Missing 'x' field")?;
+                let y_str =
+                    get_field_value(&record, &field_mapping, "y").ok_or("Missing 'y' field")?;
+                let z_str =
+                    get_field_value(&record, &field_mapping, "z").ok_or("Missing 'z' field")?;
 
-            let x: f64 = x_str
-                .parse()
-                .map_err(|e| format!("Failed to parse 'x': {}", e))?;
-            let y: f64 = y_str
-                .parse()
-                .map_err(|e| format!("Failed to parse 'y': {}", e))?;
-            let z: f64 = z_str
-                .parse()
-                .map_err(|e| format!("Failed to parse 'z': {}", e))?;
+                let x: f64 = x_str
+                    .parse()
+                    .map_err(|e| format!("Failed to parse 'x': {}", e))?;
+                let y: f64 = y_str
+                    .parse()
+                    .map_err(|e| format!("Failed to parse 'y': {}", e))?;
+                let z: f64 = z_str
+                    .parse()
+                    .map_err(|e| format!("Failed to parse 'z': {}", e))?;
 
-            let color = Color {
-                r: parse_optional_field(&record, &field_mapping, "r")?.unwrap_or(0),
-                g: parse_optional_field(&record, &field_mapping, "g")?.unwrap_or(0),
-                b: parse_optional_field(&record, &field_mapping, "b")?.unwrap_or(0),
-            };
+                let color = Color {
+                    r: parse_optional_field(&record, &field_mapping, "r")?.unwrap_or(0),
+                    g: parse_optional_field(&record, &field_mapping, "g")?.unwrap_or(0),
+                    b: parse_optional_field(&record, &field_mapping, "b")?.unwrap_or(0),
+                };
 
-            let attributes = PointAttributes {
-                intensity: parse_optional_field(&record, &field_mapping, "intensity")?,
-                return_number: parse_optional_field(&record, &field_mapping, "return_number")?,
-                classification: get_field_value(&record, &field_mapping, "classification")
-                    .map(|v| v.to_string()),
-                scanner_channel: parse_optional_field(&record, &field_mapping, "scanner_channel")?,
-                scan_angle: parse_optional_field(&record, &field_mapping, "scan_angle")?,
-                user_data: parse_optional_field(&record, &field_mapping, "user_data")?,
-                point_source_id: parse_optional_field(&record, &field_mapping, "point_source_id")?,
-                gps_time: parse_optional_field(&record, &field_mapping, "gps_time")?,
-            };
+                let attributes = PointAttributes {
+                    intensity: parse_optional_field(&record, &field_mapping, "intensity")?,
+                    return_number: parse_optional_field(&record, &field_mapping, "return_number")?,
+                    classification: get_field_value(&record, &field_mapping, "classification")
+                        .map(|v| v.to_string()),
+                    scanner_channel: parse_optional_field(
+                        &record,
+                        &field_mapping,
+                        "scanner_channel",
+                    )?,
+                    scan_angle: parse_optional_field(&record, &field_mapping, "scan_angle")?,
+                    user_data: parse_optional_field(&record, &field_mapping, "user_data")?,
+                    point_source_id: parse_optional_field(
+                        &record,
+                        &field_mapping,
+                        "point_source_id",
+                    )?,
+                    gps_time: parse_optional_field(&record, &field_mapping, "gps_time")?,
+                };
 
-            let point = Point {
-                x: ((x * scale_x) + offset_x) as i32,
-                y: ((y * scale_y) + offset_y) as i32,
-                z: ((z * scale_z) + offset_z) as i32,
-                color,
-                attributes,
-            };
+                let point = Point {
+                    x: ((x - offset_x) / scale_x) as u32,
+                    y: ((y - offset_y) / scale_y) as u32,
+                    z: ((z - offset_z) / scale_z) as u32,
+                    color,
+                    attributes,
+                };
 
-            points.push(point);
+                points.push(point);
+            }
         }
         println!("Parse CSV time: {:?}", start.elapsed());
 
