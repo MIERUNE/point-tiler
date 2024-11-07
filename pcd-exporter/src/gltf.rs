@@ -30,9 +30,12 @@ pub fn write_glb<W: Write>(
     // TODO: color情報を書き込む方法
 
     for point in &points.points {
-        let x = (point.x as f32 * scale[0] as f32 + offset[0] as f32).to_bits();
-        let y = (point.y as f32 * scale[1] as f32 + offset[1] as f32).to_bits();
-        let z = (point.z as f32 * scale[2] as f32 + offset[2] as f32).to_bits();
+        // let x = (point.x as f32 * scale[0] as f32 + offset[0] as f32).to_bits();
+        // let y = (point.y as f32 * scale[1] as f32 + offset[1] as f32).to_bits();
+        // let z = (point.z as f32 * scale[2] as f32 + offset[2] as f32).to_bits();
+        let x = (point.x as f32).to_bits();
+        let y = (point.y as f32).to_bits();
+        let z = (point.z as f32).to_bits();
         let r = point.color.r as u32;
         let g = point.color.g as u32;
         let b = point.color.b as u32;
@@ -100,6 +103,15 @@ pub fn write_glb<W: Write>(
         buffers
     };
 
+    let extensions_used = {
+        let extensions_used = vec![
+            "EXT_mesh_features".to_string(),
+            "EXT_structural_metadata".to_string(),
+        ];
+
+        extensions_used
+    };
+
     let gltf = Gltf {
         scenes: vec![Scene {
             nodes: Some(vec![0]),
@@ -107,14 +119,19 @@ pub fn write_glb<W: Write>(
         }],
         nodes: vec![Node {
             mesh: Some(0),
-            translation: points.metadata.offset,
-            scale: points.metadata.scale,
+            translation: offset,
+            scale,
             ..Default::default()
         }],
         meshes: gltf_meshes,
         accessors: gltf_accessors,
         buffer_views: gltf_buffer_views,
         buffers: gltf_buffers,
+        extensions: cesiumtiles_gltf_json::extensions::gltf::Gltf {
+            ..Default::default()
+        }
+        .into(),
+        extensions_used,
         ..Default::default()
     };
 

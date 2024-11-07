@@ -1,4 +1,8 @@
 {
+  "extensionsUsed": [
+    "EXT_mesh_features",
+    "EXT_structural_metadata"
+  ],
   "accessors": [
     {
       "name": "positions",
@@ -7,14 +11,14 @@
       "count": 5,
       "type": "VEC3",
       "max": [
-        -19000,
-        -59357.91015625,
-        13.800000190734863
+        0,
+        57965,
+        1158
       ],
       "min": [
-        -19000,
-        -59937.55859375,
-        2.2200000286102295
+        0,
+        0,
+        0
       ]
     },
     {
@@ -79,5 +83,6 @@
         0
       ]
     }
-  ]
+  ],
+  "extensions": {}
 }
