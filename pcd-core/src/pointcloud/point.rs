@@ -37,6 +37,12 @@ pub struct PointCloud {
     pub metadata: Metadata,
 }
 
+impl PointCloud {
+    pub fn iter(&self) -> impl Iterator<Item = &Point> {
+        self.points.iter()
+    }
+}
+
 // This represents the maximum and minimum values of the original coordinate values obtained by combining the scale and offset.
 #[derive(Debug, Clone, Default)]
 pub struct BoundingVolume {
