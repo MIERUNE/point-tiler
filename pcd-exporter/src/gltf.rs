@@ -24,10 +24,9 @@ fn rcp_safe(value: f32) -> f32 {
     }
 }
 
-pub fn write_glb<W: Write>(
-    writer: W,
-    points: &PointCloud,
-) -> Result<(Gltf, Vec<u8>), Box<dyn Error>> {
+pub fn generate_glb<'a>(
+    points: PointCloud,
+) -> Result<cesiumtiles_gltf::glb::Glb<'a>, Box<dyn Error>> {
     let mut bin_content: Vec<u8> = Vec::new();
     let mut gltf_buffer_views = Vec::new();
     let mut gltf_accessors = Vec::new();
@@ -181,11 +180,8 @@ pub fn write_glb<W: Write>(
         ..Default::default()
     };
 
-    cesiumtiles_gltf::glb::Glb {
+    Ok(cesiumtiles_gltf::glb::Glb {
         json: serde_json::to_vec(&gltf).unwrap().into(),
         bin: Some(bin_content.clone().into()),
-    }
-    .to_writer_with_alignment(writer, 8)?;
-
-    Ok((gltf, bin_content))
+    })
 }

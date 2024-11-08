@@ -1,6 +1,6 @@
 use std::path::PathBuf;
 
-use pcd_exporter::gltf::write_glb;
+use pcd_exporter::gltf::generate_glb;
 use pcd_parser::parsers::{las::LasParserProvider, ParserProvider as _};
 
 fn main() {
@@ -26,6 +26,8 @@ fn main() {
     let glb_path = "pcd-exporter/examples/data/output/sample.glb";
     std::fs::create_dir_all(std::path::Path::new(glb_path).parent().unwrap()).unwrap();
 
+    let glb = generate_glb(point_cloud.unwrap()).unwrap();
+
     let writer = std::fs::File::create(glb_path).unwrap();
-    write_glb(writer, &point_cloud.unwrap()).unwrap();
+    let _ = glb.to_writer_with_alignment(writer, 8);
 }
