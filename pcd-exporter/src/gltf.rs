@@ -32,8 +32,7 @@ pub fn write_glb<W: Write>(
     let mut gltf_buffer_views = Vec::new();
     let mut gltf_accessors = Vec::new();
 
-    const BYTE_STRIDE: usize = 2 * 6;
-    // const BYTE_STRIDE: usize = 4 * 6;
+    const BYTE_STRIDE: usize = (2 * 3 + 2) + (2 * 3 + 2);
 
     let buffer_offset = bin_content.len();
     let mut buffer = [0u8; BYTE_STRIDE];
@@ -43,8 +42,6 @@ pub fn write_glb<W: Write>(
 
     let scale = points.metadata.scale;
     let offset = points.metadata.offset;
-
-    // TODO: color情報を書き込む方法
 
     for point in &points.points {
         let raw_x = point.x as f32 * scale[0] as f32 + offset[0] as f32;
@@ -96,7 +93,11 @@ pub fn write_glb<W: Write>(
         position_min[1] = position_min[1].min(y);
         position_min[2] = position_min[2].min(z);
 
-        LittleEndian::write_u16_into(&[x, y, z, r, g, b], &mut buffer);
+        LittleEndian::write_u16_into(&[x, y, z], &mut buffer[0..6]);
+        buffer[6..8].copy_from_slice(&[0, 0]);
+        LittleEndian::write_u16_into(&[r, g, b], &mut buffer[8..14]);
+        buffer[14..16].copy_from_slice(&[0, 0]);
+
         bin_content.write_all(&buffer)?;
     }
 
@@ -127,15 +128,19 @@ pub fn write_glb<W: Write>(
         name: Some("colors".to_string()),
         buffer_view: Some(gltf_buffer_views.len() as u32 - 1),
         component_type: ComponentType::UnsignedShort,
-        byte_offset: 2 * 3,
+        byte_offset: 2 * 3 + 2,
         count: points.points.len() as u32,
         type_: AccessorType::Vec3,
+        normalized: true,
         ..Default::default()
     });
 
     let gltf_meshes = vec![Mesh {
         primitives: vec![MeshPrimitive {
-            attributes: HashMap::from_iter(vec![("POSITION".to_string(), 0)]),
+            attributes: HashMap::from_iter(vec![
+                ("POSITION".to_string(), 0),
+                ("COLOR_0".to_string(), 1),
+            ]),
             mode: cesiumtiles_gltf_json::PrimitiveMode::Points,
             ..Default::default()
         }],

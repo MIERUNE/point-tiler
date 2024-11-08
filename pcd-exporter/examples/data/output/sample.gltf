@@ -10,12 +10,13 @@
       "name": "positions",
       "bufferView": 0,
       "componentType": 5123,
-      "count": 5,
+      "normalized": true,
+      "count": 100,
       "type": "VEC3",
       "max": [
-        0,
+        881,
         16383,
-        327
+        62
       ],
       "min": [
         0,
@@ -26,9 +27,10 @@
     {
       "name": "colors",
       "bufferView": 0,
-      "byteOffset": 6,
+      "byteOffset": 8,
       "componentType": 5123,
-      "count": 5,
+      "normalized": true,
+      "count": 100,
       "type": "VEC3"
     }
   ],
@@ -40,8 +42,8 @@
     {
       "name": "vertices",
       "buffer": 0,
-      "byteLength": 60,
-      "byteStride": 12,
+      "byteLength": 1600,
+      "byteStride": 16,
       "target": 34962,
       "byteOffset": 0
     }
@@ -49,7 +51,7 @@
   "buffers": [
     {
       "uri": "sample_data.bin",
-      "byteLength": 60
+      "byteLength": 1600
     }
   ],
   "meshes": [
@@ -57,6 +59,7 @@
       "primitives": [
         {
           "attributes": {
+            "COLOR_0": 1,
             "POSITION": 0
           },
           "mode": 0
@@ -73,9 +76,9 @@
         0.01
       ],
       "translation": [
-        -19000,
-        -59937.56,
-        2.22
+        -5600,
+        -35207.91,
+        3.41
       ]
     }
   ],
