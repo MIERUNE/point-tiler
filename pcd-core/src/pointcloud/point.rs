@@ -31,16 +31,6 @@ pub struct Point {
     pub attributes: PointAttributes,
 }
 
-impl Point {
-    pub fn original_coordinates(&self, scale: [f64; 3], offset: [f64; 3]) -> [f64; 3] {
-        [
-            (self.x as f64 * scale[0]) + offset[0],
-            (self.y as f64 * scale[1]) + offset[1],
-            (self.z as f64 * scale[2]) + offset[2],
-        ]
-    }
-}
-
 #[derive(Debug, Clone)]
 pub struct PointCloud {
     pub points: Vec<Point>,
@@ -50,6 +40,17 @@ pub struct PointCloud {
 impl PointCloud {
     pub fn iter(&self) -> impl Iterator<Item = &Point> {
         self.points.iter()
+    }
+
+    pub fn original_coordinates(&self) -> impl Iterator<Item = [f64; 3]> + '_ {
+        let scale = self.metadata.scale;
+        let offset = self.metadata.offset;
+        self.points.iter().map(move |point| {
+            let x = point.x as f64 * scale[0] + offset[0];
+            let y = point.y as f64 * scale[1] + offset[1];
+            let z = point.z as f64 * scale[2] + offset[2];
+            [x, y, z]
+        })
     }
 }
 
