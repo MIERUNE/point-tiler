@@ -31,6 +31,16 @@ pub struct Point {
     pub attributes: PointAttributes,
 }
 
+impl Point {
+    pub fn original_coordinates(&self, scale: [f64; 3], offset: [f64; 3]) -> [f64; 3] {
+        [
+            (self.x as f64 * scale[0]) + offset[0],
+            (self.y as f64 * scale[1]) + offset[1],
+            (self.z as f64 * scale[2]) + offset[2],
+        ]
+    }
+}
+
 #[derive(Debug, Clone)]
 pub struct PointCloud {
     pub points: Vec<Point>,
