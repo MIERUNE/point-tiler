@@ -836,6 +836,9 @@ dependencies = [
 [[package]]
 name = "pcd-transformer"
 version = "0.0.1"
+dependencies = [
+ "pcd-core",
+]
 
 [[package]]
 name = "percent-encoding"
