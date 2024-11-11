@@ -34,6 +34,17 @@ pub struct Point {
     pub attributes: PointAttributes,
 }
 
+impl Point {
+    pub fn set(&mut self, x: f64, y: f64, z: f64, r: u16, g: u16, b: u16) {
+        self.x = x;
+        self.y = y;
+        self.z = z;
+        self.color.r = r;
+        self.color.g = g;
+        self.color.b = b;
+    }
+}
+
 #[derive(Debug, Clone)]
 pub struct PointCloud {
     pub points: Vec<Point>,
@@ -111,6 +122,12 @@ impl PointCloud {
     pub fn iter(&self) -> impl Iterator<Item = (f64, f64, f64, &Point)> {
         self.points
             .iter()
+            .map(|point| (point.x, point.y, point.z, point))
+    }
+
+    pub fn iter_mut(&mut self) -> impl Iterator<Item = (f64, f64, f64, &mut Point)> {
+        self.points
+            .iter_mut()
             .map(|point| (point.x, point.y, point.z, point))
     }
 
