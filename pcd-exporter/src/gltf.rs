@@ -7,7 +7,7 @@ use cesiumtiles_gltf_json::{
 };
 use pcd_core::pointcloud::point::PointCloud;
 
-pub fn quantize_unorm(value: f32, bits: i32) -> i32 {
+pub fn quantize_unsigned_norm(value: f32, bits: i32) -> i32 {
     let max_value = (1i32 << bits) - 1i32;
     let scale = max_value as f32;
 
@@ -16,7 +16,7 @@ pub fn quantize_unorm(value: f32, bits: i32) -> i32 {
     (clamped * scale + 0.5) as i32
 }
 
-fn rcp_safe(value: f32) -> f32 {
+fn rcp(value: f32) -> f32 {
     if value != 0.0 {
         1.0 / value
     } else {
@@ -31,66 +31,49 @@ pub fn generate_glb<'a>(
     let mut gltf_buffer_views = Vec::new();
     let mut gltf_accessors = Vec::new();
 
+    // TODO: カラーが存在しないデータに対応
     const BYTE_STRIDE: usize = (2 * 3 + 2) + (2 * 3 + 2);
 
     let buffer_offset = bin_content.len();
     let mut buffer = [0u8; BYTE_STRIDE];
 
-    let mut raw_point_max = [f64::MIN; 3];
-    let mut raw_point_min = [f64::MAX; 3];
-
     let scale = points.metadata.scale;
     let offset = points.metadata.offset;
 
-    for point in &points.points {
-        let raw_x = point.x as f32 * scale[0] as f32 + offset[0] as f32;
-        let raw_y = point.y as f32 * scale[1] as f32 + offset[1] as f32;
-        let raw_z = point.z as f32 * scale[2] as f32 + offset[2] as f32;
+    let mut quantized_position_max = [u16::MIN; 3];
+    let mut quantized_position_min = [u16::MAX; 3];
 
-        raw_point_max[0] = raw_point_max[0].max(raw_x as f64);
-        raw_point_max[1] = raw_point_max[1].max(raw_y as f64);
-        raw_point_max[2] = raw_point_max[2].max(raw_z as f64);
-        raw_point_min[0] = raw_point_min[0].min(raw_x as f64);
-        raw_point_min[1] = raw_point_min[1].min(raw_y as f64);
-        raw_point_min[2] = raw_point_min[2].min(raw_z as f64);
-    }
-
-    let mut position_max = [u16::MIN; 3];
-    let mut position_min = [u16::MAX; 3];
-
-    let pos_bits = 14;
-    let pos_scale = &points.points.iter().fold(0f32, |result, point| {
-        let raw_x = point.x as f32 * scale[0] as f32 + offset[0] as f32;
-        let raw_y = point.y as f32 * scale[1] as f32 + offset[1] as f32;
-        let raw_z = point.z as f32 * scale[2] as f32 + offset[2] as f32;
-
-        result
-            .max(raw_x - offset[0] as f32)
-            .max(raw_y - offset[1] as f32)
-            .max(raw_z - offset[2] as f32)
-    });
-    let pos_scale_inv = rcp_safe(*pos_scale);
+    let bits = 14;
+    let common_scale =
+        points
+            .iter_with_raw_coords()
+            .fold(0f32, |result, (raw_x, raw_y, raw_z, _)| {
+                result
+                    .max(raw_x as f32 - offset[0] as f32)
+                    .max(raw_y as f32 - offset[1] as f32)
+                    .max(raw_z as f32 - offset[2] as f32)
+            });
+    let point_scale_inv = rcp(common_scale);
 
     // quantize
-    for point in &points.points {
-        let raw_x = point.x as f32 * scale[0] as f32 + offset[0] as f32;
-        let raw_y = point.y as f32 * scale[1] as f32 + offset[1] as f32;
-        let raw_z = point.z as f32 * scale[2] as f32 + offset[2] as f32;
-
-        let x = quantize_unorm((raw_x - offset[0] as f32) * pos_scale_inv, pos_bits) as u16;
-        let y = quantize_unorm((raw_y - offset[1] as f32) * pos_scale_inv, pos_bits) as u16;
-        let z = quantize_unorm((raw_z - offset[2] as f32) * pos_scale_inv, pos_bits) as u16;
+    for (raw_x, raw_y, raw_z, point) in points.iter_with_raw_coords() {
+        let x = quantize_unsigned_norm((raw_x as f32 - offset[0] as f32) * point_scale_inv, bits)
+            as u16;
+        let y = quantize_unsigned_norm((raw_y as f32 - offset[1] as f32) * point_scale_inv, bits)
+            as u16;
+        let z = quantize_unsigned_norm((raw_z as f32 - offset[2] as f32) * point_scale_inv, bits)
+            as u16;
 
         let r = point.color.r;
         let g = point.color.g;
         let b = point.color.b;
 
-        position_max[0] = position_max[0].max(x);
-        position_max[1] = position_max[1].max(y);
-        position_max[2] = position_max[2].max(z);
-        position_min[0] = position_min[0].min(x);
-        position_min[1] = position_min[1].min(y);
-        position_min[2] = position_min[2].min(z);
+        quantized_position_max[0] = quantized_position_max[0].max(x);
+        quantized_position_max[1] = quantized_position_max[1].max(y);
+        quantized_position_max[2] = quantized_position_max[2].max(z);
+        quantized_position_min[0] = quantized_position_min[0].min(x);
+        quantized_position_min[1] = quantized_position_min[1].min(y);
+        quantized_position_min[2] = quantized_position_min[2].min(z);
 
         LittleEndian::write_u16_into(&[x, y, z], &mut buffer[0..6]);
         buffer[6..8].copy_from_slice(&[0, 0]);
@@ -116,8 +99,8 @@ pub fn generate_glb<'a>(
         buffer_view: Some(gltf_buffer_views.len() as u32 - 1),
         component_type: ComponentType::UnsignedShort,
         count: points.points.len() as u32,
-        min: Some(position_min.iter().map(|&x| x as f64).collect()),
-        max: Some(position_max.iter().map(|&x| x as f64).collect()),
+        min: Some(quantized_position_min.iter().map(|&x| x as f64).collect()),
+        max: Some(quantized_position_max.iter().map(|&x| x as f64).collect()),
         type_: AccessorType::Vec3,
         normalized: true,
         ..Default::default()
