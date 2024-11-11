@@ -44,19 +44,18 @@ pub fn generate_glb<'a>(
     let mut quantized_position_min = [u16::MAX; 3];
 
     let bits = 14;
-    let common_scale =
-        points
-            .iter_with_raw_coords()
-            .fold(0f32, |result, (raw_x, raw_y, raw_z, _)| {
-                result
-                    .max(raw_x as f32 - offset[0] as f32)
-                    .max(raw_y as f32 - offset[1] as f32)
-                    .max(raw_z as f32 - offset[2] as f32)
-            });
+    let common_scale = points
+        .iter()
+        .fold(0f32, |result, (raw_x, raw_y, raw_z, _)| {
+            result
+                .max(raw_x as f32 - offset[0] as f32)
+                .max(raw_y as f32 - offset[1] as f32)
+                .max(raw_z as f32 - offset[2] as f32)
+        });
     let point_scale_inv = rcp(common_scale);
 
     // quantize
-    for (raw_x, raw_y, raw_z, point) in points.iter_with_raw_coords() {
+    for (raw_x, raw_y, raw_z, point) in points.iter() {
         let x = quantize_unsigned_norm((raw_x as f32 - offset[0] as f32) * point_scale_inv, bits)
             as u16;
         let y = quantize_unsigned_norm((raw_y as f32 - offset[1] as f32) * point_scale_inv, bits)

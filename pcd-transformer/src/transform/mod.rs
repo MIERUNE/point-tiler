@@ -1,7 +1,6 @@
 use pcd_core::pointcloud::point::PointCloud;
 
 pub mod projection;
-pub mod tile;
 
 pub trait Transform {
     fn transform(&self, point_cloud: PointCloud) -> Vec<PointCloud>;

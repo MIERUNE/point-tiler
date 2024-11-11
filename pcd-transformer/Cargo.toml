@@ -5,3 +5,7 @@ edition = "2021"
 
 [dependencies]
 pcd-core = { path = "../pcd-core" }
+projection-transform = { path = "../projection-transform" }
+
+[dev-dependencies]
+pcd-parser = { path = "../pcd-parser" }

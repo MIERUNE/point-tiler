@@ -6,6 +6,7 @@ use pcd_parser::parsers::{las::LasParserProvider, ParserProvider as _};
 fn main() {
     let las_parser_provider = LasParserProvider {
         filenames: vec![PathBuf::from("pcd-exporter/examples/data/sample.las")],
+        epsg: 6677,
     };
     let provider = las_parser_provider;
     let parser = provider.get_parser();

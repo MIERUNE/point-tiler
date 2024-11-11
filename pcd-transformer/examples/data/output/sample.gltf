@@ -1,0 +1,92 @@
+{
+  "extensionsUsed": [
+    "KHR_mesh_quantization"
+  ],
+  "extensionsRequired": [
+    "KHR_mesh_quantization"
+  ],
+  "accessors": [
+    {
+      "name": "positions",
+      "bufferView": 0,
+      "componentType": 5123,
+      "normalized": true,
+      "count": 100,
+      "type": "VEC3",
+      "max": [
+        881,
+        16383,
+        62
+      ],
+      "min": [
+        0,
+        0,
+        0
+      ]
+    },
+    {
+      "name": "colors",
+      "bufferView": 0,
+      "byteOffset": 8,
+      "componentType": 5123,
+      "normalized": true,
+      "count": 100,
+      "type": "VEC3"
+    }
+  ],
+  "asset": {
+    "generator": "cesiumtiles-gltf",
+    "version": "2.0"
+  },
+  "bufferViews": [
+    {
+      "name": "vertices",
+      "buffer": 0,
+      "byteLength": 1600,
+      "byteStride": 16,
+      "target": 34962,
+      "byteOffset": 0
+    }
+  ],
+  "buffers": [
+    {
+      "uri": "sample_data.bin",
+      "byteLength": 1600
+    }
+  ],
+  "meshes": [
+    {
+      "primitives": [
+        {
+          "attributes": {
+            "COLOR_0": 1,
+            "POSITION": 0
+          },
+          "mode": 0
+        }
+      ]
+    }
+  ],
+  "nodes": [
+    {
+      "mesh": 0,
+      "scale": [
+        0.01,
+        0.01,
+        0.01
+      ],
+      "translation": [
+        -5600,
+        -35207.91,
+        3.41
+      ]
+    }
+  ],
+  "scenes": [
+    {
+      "nodes": [
+        0
+      ]
+    }
+  ]
+}

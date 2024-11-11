@@ -4,15 +4,14 @@ pub trait TransformBuilder {
     fn build(&self) -> Box<dyn Transform>;
 }
 
-pub struct TilingAndProjectionTransformBuilder;
+pub struct ProjectionTransformerBuilder;
 
-impl TransformBuilder for TilingAndProjectionTransformBuilder {
+impl TransformBuilder for ProjectionTransformerBuilder {
     fn build(&self) -> Box<dyn Transform> {
-        let tiling_transform = Box::new(crate::transform::tile::TilingTransform::new());
         let projection_transform =
             Box::new(crate::transform::projection::ProjectionTransform::new());
 
-        let composite = CompositeTransform::new(vec![tiling_transform, projection_transform]);
+        let composite = CompositeTransform::new(vec![projection_transform]);
 
         Box::new(composite)
     }

@@ -27,6 +27,7 @@ pub struct CsvParser {
 pub static SCALE_FACTOR: f64 = 0.001;
 
 impl Parser for CsvParser {
+    // TODO: LASパーサーのように、PointsからPointCloudを作成するように変更
     fn parse(&self) -> Result<PointCloud, Box<dyn Error>> {
         let start = std::time::Instant::now();
         let mut reader = ReaderBuilder::new()
@@ -108,8 +109,7 @@ impl Parser for CsvParser {
         let metadata = Metadata {
             point_count,
             bounding_volume,
-            coordinate_system_wkt: "PROJCS[\"JGD2011 / Japan Plane Rectangular CS VII\",...]"
-                .to_string(),
+            epsg: 6677,
             scale: [scale_x, scale_y, scale_z],
             offset: [offset_x, offset_y, offset_z],
             other: HashMap::new(),
@@ -171,9 +171,9 @@ impl Parser for CsvParser {
                 };
 
                 let point = Point {
-                    x: ((x - offset_x) / scale_x) as u32,
-                    y: ((y - offset_y) / scale_y) as u32,
-                    z: ((z - offset_z) / scale_z) as u32,
+                    x,
+                    y,
+                    z,
                     color,
                     attributes,
                 };
