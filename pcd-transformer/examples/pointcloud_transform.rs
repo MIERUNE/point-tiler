@@ -11,7 +11,7 @@ fn main() {
         filenames: vec![PathBuf::from(
             "pcd-transformer/examples/data/sample.las".to_string(),
         )],
-        epsg: 10170,
+        epsg: 6677,
     };
     let provider = las_parser_provider;
     let parser = provider.get_parser();
@@ -22,8 +22,7 @@ fn main() {
 
     let transformed = transformer.execute(point_cloud);
 
-    for (i, pc) in transformed.iter().enumerate() {
-        println!("PointCloud {}:", i);
-        println!("  Point(x: {}, y: {}, z: {})", pc.0, pc.1, pc.2);
+    for point in transformed.iter() {
+        // println!("  Point(x: {}, y: {}, z: {})", point.0, point.1, point.2);
     }
 }

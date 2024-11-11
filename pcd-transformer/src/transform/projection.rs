@@ -18,21 +18,25 @@ impl Transform for ProjectionTransform {
         let input_epsg = point_cloud.metadata.epsg;
 
         match input_epsg {
-            EPSG_JGD2011_JPRECT_I_JGD2011_HEIGHT
-            | EPSG_JGD2011_JPRECT_II_JGD2011_HEIGHT
-            | EPSG_JGD2011_JPRECT_III_JGD2011_HEIGHT
-            | EPSG_JGD2011_JPRECT_IV_JGD2011_HEIGHT
-            | EPSG_JGD2011_JPRECT_V_JGD2011_HEIGHT
-            | EPSG_JGD2011_JPRECT_VI_JGD2011_HEIGHT
-            | EPSG_JGD2011_JPRECT_VII_JGD2011_HEIGHT
-            | EPSG_JGD2011_JPRECT_VIII_JGD2011_HEIGHT
-            | EPSG_JGD2011_JPRECT_IX_JGD2011_HEIGHT
-            | EPSG_JGD2011_JPRECT_X_JGD2011_HEIGHT
-            | EPSG_JGD2011_JPRECT_XI_JGD2011_HEIGHT
-            | EPSG_JGD2011_JPRECT_XII_JGD2011_HEIGHT
-            | EPSG_JGD2011_JPRECT_XIII_JGD2011_HEIGHT => {
-                self.transform_from_jgd2011(point_cloud, None)
-            }
+            EPSG_JGD2011_JPRECT_I
+            | EPSG_JGD2011_JPRECT_II
+            | EPSG_JGD2011_JPRECT_III
+            | EPSG_JGD2011_JPRECT_IV
+            | EPSG_JGD2011_JPRECT_V
+            | EPSG_JGD2011_JPRECT_VI
+            | EPSG_JGD2011_JPRECT_VII
+            | EPSG_JGD2011_JPRECT_VIII
+            | EPSG_JGD2011_JPRECT_IX
+            | EPSG_JGD2011_JPRECT_X
+            | EPSG_JGD2011_JPRECT_XI
+            | EPSG_JGD2011_JPRECT_XII
+            | EPSG_JGD2011_JPRECT_XIII
+            | EPSG_JGD2011_JPRECT_XIV
+            | EPSG_JGD2011_JPRECT_XV
+            | EPSG_JGD2011_JPRECT_XVI
+            | EPSG_JGD2011_JPRECT_XVII
+            | EPSG_JGD2011_JPRECT_XVIII
+            | EPSG_JGD2011_JPRECT_XIX => self.transform_from_jgd2011(point_cloud, None),
             _ => {
                 panic!("Unsupported input CRS: {}", input_epsg);
             }
