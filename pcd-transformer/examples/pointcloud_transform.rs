@@ -23,6 +23,6 @@ fn main() {
     let transformed = transformer.execute(point_cloud);
 
     for point in transformed.iter() {
-        // println!("  Point(x: {}, y: {}, z: {})", point.0, point.1, point.2);
+        println!("  Point(x: {}, y: {}, z: {})", point.0, point.1, point.2);
     }
 }

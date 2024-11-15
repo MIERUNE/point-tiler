@@ -36,7 +36,7 @@ impl Transform for ProjectionTransform {
             | EPSG_JGD2011_JPRECT_XVI
             | EPSG_JGD2011_JPRECT_XVII
             | EPSG_JGD2011_JPRECT_XVIII
-            | EPSG_JGD2011_JPRECT_XIX => self.transform_from_jgd2011(point_cloud, None),
+            | EPSG_JGD2011_JPRECT_XIX => self.transform_from_jgd2011(point_cloud, Some(input_epsg)),
             _ => {
                 panic!("Unsupported input CRS: {}", input_epsg);
             }
@@ -74,13 +74,16 @@ impl ProjectionTransform {
                 for (x, y, z, point) in point_cloud.iter() {
                     // Swap x and y (lat, lng -> lng, lat)
                     let (lng, lat, height) = (y, x, z);
+
                     let (lng, lat, height) = if let Some(input_epsg) = rectangular {
                         Self::rectangular_to_lnglat(lng, lat, height, input_epsg)
                     } else {
                         (lng, lat, height)
                     };
+
                     // JGD2011 to WGS 84 (elevation to ellipsoidal height)
                     let (lng, lat, height) = self.jgd2wgs.convert(lng, lat, height);
+
                     points.push(Point {
                         x: lng,
                         y: lat,

@@ -5,11 +5,12 @@
             "type": "lldb",
             "request": "launch",
             "name": "Debug executable 'main'",
-            "program": "${workspaceFolder}/target/release/examples/las_to_gltf",
+            "program": "${workspaceFolder}/target/release/examples/pointcloud_transform",
             "cargo": {
-                "args": ["build", "--release", "--package", "pcd-exporter", "--example", "las_to_gltf"],
+                "args": ["build", "--release", "--package", "pcd-transformer", "--example", "pointcloud_transform"],
+                // "args": ["build", "--package", "pcd-transformer", "--example", "pointcloud_transform"],
                 "filter": {
-                    "name": "las_to_gltf",
+                    "name": "pointcloud_transform",
                 },
             },
             "cwd": "${workspaceFolder}",
