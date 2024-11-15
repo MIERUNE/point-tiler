@@ -9,3 +9,4 @@ projection-transform = { path = "../projection-transform" }
 
 [dev-dependencies]
 pcd-parser = { path = "../pcd-parser" }
+pcd-exporter = { path = "../pcd-exporter" }

@@ -858,6 +858,7 @@ name = "pcd-transformer"
 version = "0.0.1"
 dependencies = [
  "pcd-core",
+ "pcd-exporter",
  "pcd-parser",
  "projection-transform",
 ]
