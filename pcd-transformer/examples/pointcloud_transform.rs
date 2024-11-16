@@ -12,7 +12,7 @@ use projection_transform::cartesian::geodetic_to_geocentric;
 fn main() {
     let las_parser_provider = LasParserProvider {
         filenames: vec![PathBuf::from(
-            "/Users/satoru/Downloads/pointcloud/09LD1876.las".to_string(),
+            "pcd-transformer/examples/data/sample.las".to_string(),
         )],
         epsg: 6677,
     };
