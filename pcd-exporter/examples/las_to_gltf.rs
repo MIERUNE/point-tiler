@@ -6,7 +6,7 @@ use std::{
 use pcd_core::pointcloud::point::{Point, PointCloud};
 use pcd_exporter::{
     cesiumtiles::{make_tile_content, pointcloud_to_tiles},
-    gltf::generate_glb,
+    gltf::{generate_glb, generate_quantized_glb},
     tiling::{TileContent, TileTree},
 };
 use pcd_parser::parsers::{las::LasParserProvider, ParserProvider as _};
@@ -18,6 +18,7 @@ use projection_transform::cartesian::geodetic_to_geocentric;
 fn main() {
     let input_files = vec![PathBuf::from(
         "/Users/satoru/Downloads/09LD1885.las".to_string(),
+        // "pcd-exporter/examples/data/sample.las".to_string(),
     )];
     let output_path = PathBuf::from(
         "/Users/satoru/Downloads/plateau/plateau-tutorial/output/3dtiles_tokyo_pointcloud",
@@ -37,7 +38,7 @@ fn main() {
     let transform_builder = PointCloudTransformBuilder::new(output_epsg);
     let transformer = PointCloudTransformer::new(Box::new(transform_builder));
 
-    let transformed = transformer.execute(point_cloud);
+    let transformed = transformer.execute(point_cloud.clone());
     print!("Transformed first point: {:?}", transformed.points[0]);
 
     println!(
@@ -61,19 +62,21 @@ fn main() {
 
         let mut points = vec![];
         let ellipsoid = projection_transform::ellipsoid::wgs84();
+
         for point in pointcloud.iter() {
             let (lng, lat, height) = (point.0, point.1, point.2);
             let (x, y, z) = geodetic_to_geocentric(&ellipsoid, lng, lat, height);
-            let p = (x, z, -y);
             points.push(Point {
-                x: p.0,
-                y: p.1,
-                z: p.2,
+                x,
+                y: z,
+                z: -y,
                 color: point.3.color.clone(),
                 attributes: point.3.attributes.clone(),
             });
         }
         let transformed = PointCloud::new(points, output_epsg);
+        println!("transformed first point: {:?}", transformed.points[0]);
+        println!("offset: {:?}", transformed.metadata.offset);
 
         let glb_path = format!(
             "{}/{}",

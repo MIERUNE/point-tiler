@@ -43,6 +43,14 @@ impl Point {
         self.color.g = g;
         self.color.b = b;
     }
+
+    pub fn to_rgb8(&self) -> [u8; 3] {
+        [
+            (self.color.r as f64 / 65535.0 * 255.0) as u8,
+            (self.color.g as f64 / 65535.0 * 255.0) as u8,
+            (self.color.b as f64 / 65535.0 * 255.0) as u8,
+        ]
+    }
 }
 
 #[derive(Debug, Clone)]
