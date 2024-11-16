@@ -5,7 +5,7 @@ use std::{
 
 use pcd_core::pointcloud::point::{Point, PointCloud};
 use pcd_exporter::{
-    cesiumtiles::{make_tile_contents, pointcloud_to_tiles},
+    cesiumtiles::{make_tile_content, pointcloud_to_tiles},
     gltf::generate_glb,
     tiling::{TileContent, TileTree},
 };
@@ -17,7 +17,7 @@ use projection_transform::cartesian::geodetic_to_geocentric;
 
 fn main() {
     let input_files = vec![PathBuf::from(
-        "/Users/satoru/Downloads/pointcloud/09LD1876.las".to_string(),
+        "/Users/satoru/Downloads/09LD1885.las".to_string(),
     )];
     let output_path = PathBuf::from(
         "/Users/satoru/Downloads/plateau/plateau-tutorial/output/3dtiles_tokyo_pointcloud",
@@ -45,17 +45,17 @@ fn main() {
 
     let min_zoom = 18;
     let max_zoom = 18;
-    let tiles = pointcloud_to_tiles(&transformed, min_zoom, max_zoom);
+    let tiled_pointcloud = pointcloud_to_tiles(&transformed, min_zoom, max_zoom);
 
-    let mut contents: Vec<TileContent> = Default::default();
-    for (tile, pointcloud) in tiles {
-        println!("Tile: {:?}", tile);
+    let mut tile_contents: Vec<TileContent> = Default::default();
+    for (tile_coords, pointcloud) in tiled_pointcloud {
+        println!("Tile Coords: {:?}", tile_coords);
         println!(
             "  Number of points: {num_points}",
             num_points = pointcloud.points.len()
         );
 
-        let tile_content = make_tile_contents(&tile, &pointcloud);
+        let tile_content = make_tile_content(&tile_coords, &pointcloud);
 
         let mut points = vec![];
         let ellipsoid = projection_transform::ellipsoid::wgs84();
@@ -85,11 +85,11 @@ fn main() {
         let writer = std::fs::File::create(glb_path).unwrap();
         let _ = glb.to_writer_with_alignment(writer, 8);
 
-        contents.push(tile_content);
+        tile_contents.push(tile_content);
     }
 
     let mut tree = TileTree::default();
-    for content in contents.drain(..) {
+    for content in tile_contents.drain(..) {
         tree.add_content(content);
     }
 
