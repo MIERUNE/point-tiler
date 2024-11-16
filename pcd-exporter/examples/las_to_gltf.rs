@@ -32,11 +32,13 @@ fn main() {
     let provider = las_parser_provider;
     let parser = provider.get_parser();
     let point_cloud = parser.parse().unwrap();
+    println!("first point: {:?}", point_cloud.points[0]);
 
     let transform_builder = PointCloudTransformBuilder::new(output_epsg);
     let transformer = PointCloudTransformer::new(Box::new(transform_builder));
 
     let transformed = transformer.execute(point_cloud);
+    print!("Transformed first point: {:?}", transformed.points[0]);
 
     println!(
         "Number of points: {num_points}",
@@ -62,10 +64,11 @@ fn main() {
         for point in pointcloud.iter() {
             let (lng, lat, height) = (point.0, point.1, point.2);
             let (x, y, z) = geodetic_to_geocentric(&ellipsoid, lng, lat, height);
+            let p = (x, z, -y);
             points.push(Point {
-                x,
-                y,
-                z,
+                x: p.0,
+                y: p.1,
+                z: p.2,
                 color: point.3.color.clone(),
                 attributes: point.3.attributes.clone(),
             });

@@ -5,8 +5,6 @@ use tinymvt::TileZXY;
 
 use crate::tiling::{self, TileContent};
 
-pub type TiledPointCloud = (TileZXY, PointCloud);
-
 pub fn make_tile_content(tile_coord: &TileZXY, point_cloud: &PointCloud) -> TileContent {
     let (tile_zoom, tile_x, tile_y) = tile_coord;
 
