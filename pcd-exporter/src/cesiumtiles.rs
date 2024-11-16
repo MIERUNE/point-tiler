@@ -1,12 +1,36 @@
 use std::collections::HashMap;
 
-use pcd_core::pointcloud::point::{BoundingVolume, Point, PointCloud};
+use pcd_core::pointcloud::point::{Point, PointCloud};
 use tinymvt::TileZXY;
 
-use crate::tiling;
+use crate::tiling::{self, TileContent};
 
-pub fn write_cesium_tiles() {
-    println!("Hello, cesiumtiles!");
+pub type TiledPointCloud = (TileZXY, PointCloud);
+
+pub fn make_tile_contents(tiled_pointcloud: &TiledPointCloud) -> TileContent {
+    let (tile, pointcloud) = tiled_pointcloud;
+
+    let (tile_zoom, tile_x, tile_y) = tile;
+
+    let min_lng = pointcloud.metadata.bounding_volume.min[0];
+    let max_lng = pointcloud.metadata.bounding_volume.max[0];
+    let min_lat = pointcloud.metadata.bounding_volume.min[1];
+    let max_lat = pointcloud.metadata.bounding_volume.max[1];
+    let min_height = pointcloud.metadata.bounding_volume.min[2];
+    let max_height = pointcloud.metadata.bounding_volume.max[2];
+
+    let content_path = { format!("{tile_zoom}/{tile_x}/{tile_y}.glb") };
+
+    TileContent {
+        zxy: (*tile_zoom, *tile_x, *tile_y),
+        content_path,
+        min_lng,
+        max_lng,
+        min_lat,
+        max_lat,
+        min_height,
+        max_height,
+    }
 }
 
 pub fn pointcloud_to_tiles(
@@ -33,27 +57,8 @@ pub fn pointcloud_to_tiles(
     let mut result = Vec::new();
 
     for ((z, x, y), points) in tile_pointclouds {
-        let mut metadata = pointcloud.metadata.clone();
-        metadata.point_count = points.len();
-
-        let mut bounding_volume = BoundingVolume {
-            min: [f64::MAX, f64::MAX, f64::MAX],
-            max: [f64::MIN, f64::MIN, f64::MIN],
-        };
-
-        for point in &points {
-            bounding_volume.max[0] = bounding_volume.max[0].max(point.x);
-            bounding_volume.max[1] = bounding_volume.max[1].max(point.y);
-            bounding_volume.max[2] = bounding_volume.max[2].max(point.z);
-            bounding_volume.min[0] = bounding_volume.min[0].min(point.x);
-            bounding_volume.min[1] = bounding_volume.min[1].min(point.y);
-            bounding_volume.min[2] = bounding_volume.min[2].min(point.z);
-        }
-
-        metadata.bounding_volume = bounding_volume;
-
-        let tile_pointcloud = PointCloud { points, metadata };
-
+        let epsg = pointcloud.metadata.epsg;
+        let tile_pointcloud = PointCloud::new(points, epsg);
         result.push(((z, x, y), tile_pointcloud));
     }
 
