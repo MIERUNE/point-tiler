@@ -7,17 +7,15 @@ use crate::tiling::{self, TileContent};
 
 pub type TiledPointCloud = (TileZXY, PointCloud);
 
-pub fn make_tile_contents(tiled_pointcloud: &TiledPointCloud) -> TileContent {
-    let (tile, pointcloud) = tiled_pointcloud;
+pub fn make_tile_contents(tile_coord: &TileZXY, point_cloud: &PointCloud) -> TileContent {
+    let (tile_zoom, tile_x, tile_y) = tile_coord;
 
-    let (tile_zoom, tile_x, tile_y) = tile;
-
-    let min_lng = pointcloud.metadata.bounding_volume.min[0];
-    let max_lng = pointcloud.metadata.bounding_volume.max[0];
-    let min_lat = pointcloud.metadata.bounding_volume.min[1];
-    let max_lat = pointcloud.metadata.bounding_volume.max[1];
-    let min_height = pointcloud.metadata.bounding_volume.min[2];
-    let max_height = pointcloud.metadata.bounding_volume.max[2];
+    let min_lng = point_cloud.metadata.bounding_volume.min[0];
+    let max_lng = point_cloud.metadata.bounding_volume.max[0];
+    let min_lat = point_cloud.metadata.bounding_volume.min[1];
+    let max_lat = point_cloud.metadata.bounding_volume.max[1];
+    let min_height = point_cloud.metadata.bounding_volume.min[2];
+    let max_height = point_cloud.metadata.bounding_volume.max[2];
 
     let content_path = { format!("{tile_zoom}/{tile_x}/{tile_y}.glb") };
 
@@ -41,14 +39,12 @@ pub fn pointcloud_to_tiles(
     let mut tile_pointclouds: HashMap<TileZXY, Vec<Point>> = HashMap::new();
 
     for point in &pointcloud.points {
-        for zoom in min_zoom..=max_zoom {
-            println!("zoom: {}", zoom);
-            println!("point: {:?}", point);
-            let (zoom, tile_x, tile_y) = tiling::scheme::zxy_from_lng_lat(zoom, point.x, point.y);
-            let tile = (zoom, tile_x, tile_y);
+        for z in min_zoom..=max_zoom {
+            let (zoom, tile_x, tile_y) = tiling::scheme::zxy_from_lng_lat(z, point.x, point.y);
+            let tile_coords = (zoom, tile_x, tile_y);
 
             tile_pointclouds
-                .entry(tile)
+                .entry(tile_coords)
                 .or_insert_with(Vec::new)
                 .push(point.clone());
         }
