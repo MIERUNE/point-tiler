@@ -1,7 +1,7 @@
 use std::path::PathBuf;
 
 use pcd_core::pointcloud::point::{Point, PointCloud};
-use pcd_exporter::gltf::generate_glb;
+use pcd_exporter::{cesiumtiles::pointcloud_to_tiles, gltf::generate_glb};
 use pcd_parser::parsers::{las::LasParserProvider, ParserProvider as _};
 use pcd_transformer::{
     builder::PointCloudTransformBuilder,

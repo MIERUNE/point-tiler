@@ -895,6 +895,8 @@ dependencies = [
  "cesiumtiles-gltf-json",
  "pcd-core",
  "pcd-parser",
+ "pcd-transformer",
+ "projection-transform",
  "serde",
  "serde_json",
  "tinymvt",
