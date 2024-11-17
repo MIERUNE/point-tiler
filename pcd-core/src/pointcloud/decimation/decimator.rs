@@ -20,8 +20,6 @@ impl PointCloudDecimator for VoxelDecimator {
             cells.entry(index).or_default().push(point);
         }
 
-        println!("  Number of cells: {}", cells.len());
-
         let mut decimated_points = Vec::new();
         for (index, cell_points) in cells {
             let voxel_center = self.get_voxel_center(index, voxel_size);
