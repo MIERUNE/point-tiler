@@ -48,7 +48,7 @@ fn main() {
     let transformer = PointCloudTransformer::new(Box::new(transform_builder));
 
     let transformed = transformer.execute(point_cloud.clone());
-    print!("Transformed first point: {:?}", transformed.points[0]);
+    println!("Transformed first point: {:?}", transformed.points[0]);
 
     println!(
         "Number of points: {num_points}",
