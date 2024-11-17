@@ -51,6 +51,30 @@ impl Point {
             (self.color.b as f64 / 65535.0 * 255.0) as u8,
         ]
     }
+
+    fn srgb_to_linear(value: f64) -> f64 {
+        if value <= 0.04045 {
+            value / 12.92
+        } else {
+            ((value + 0.055) / 1.055).powf(2.4)
+        }
+    }
+
+    pub fn to_rgb8_normalized(&self) -> [u8; 3] {
+        let r = self.color.r as f64 / 65535.0;
+        let g = self.color.g as f64 / 65535.0;
+        let b = self.color.b as f64 / 65535.0;
+
+        let r_linear = Self::srgb_to_linear(r);
+        let g_linear = Self::srgb_to_linear(g);
+        let b_linear = Self::srgb_to_linear(b);
+
+        let r8 = (r_linear * 255.0).round().clamp(0.0, 255.0) as u8;
+        let g8 = (g_linear * 255.0).round().clamp(0.0, 255.0) as u8;
+        let b8 = (b_linear * 255.0).round().clamp(0.0, 255.0) as u8;
+
+        [r8, g8, b8]
+    }
 }
 
 #[derive(Debug, Clone)]

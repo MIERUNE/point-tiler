@@ -59,7 +59,7 @@ pub fn generate_glb<'a>(
         max[1] = max[1].max(y - offset[1]);
         max[2] = max[2].max(z - offset[2]);
 
-        let rgb8 = point.to_rgb8();
+        let rgb8 = point.to_rgb8_normalized();
         let r = rgb8[0];
         let g = rgb8[1];
         let b = rgb8[2];
@@ -188,7 +188,7 @@ pub fn generate_quantized_glb<'a>(
             quantize_unsigned_norm((raw_z as f32 - offset[2] as f32) * point_scale_inv, bits)
                 as u16;
 
-        let rgb8 = point.to_rgb8();
+        let rgb8 = point.to_rgb8_normalized();
         let r = rgb8[0];
         let g = rgb8[1];
         let b = rgb8[2];
