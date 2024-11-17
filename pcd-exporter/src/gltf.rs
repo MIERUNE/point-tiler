@@ -5,7 +5,7 @@ use cesiumtiles_gltf_json::{
     Accessor, AccessorType, Buffer, BufferView, BufferViewTarget, ComponentType, Gltf, Mesh,
     MeshPrimitive, Node, Scene,
 };
-use pcd_core::pointcloud::point::PointCloud;
+use pcd_core::pointcloud::point::{Color, Point, PointCloud};
 
 pub fn quantize_unsigned_norm(value: f32, bits: i32) -> i32 {
     let max_value = (1i32 << bits) - 1i32;
@@ -37,7 +37,6 @@ pub fn generate_glb<'a>(
     let buffer_offset = bin_content.len();
     let mut buffer = [0u8; BYTE_STRIDE];
 
-    // let scale = points.metadata.scale;
     let offset = points.metadata.offset;
 
     let mut min = [f64::MAX; 3];
@@ -135,7 +134,6 @@ pub fn generate_glb<'a>(
         nodes: vec![Node {
             mesh: Some(0),
             translation: offset,
-            // scale,
             ..Default::default()
         }],
         meshes: gltf_meshes,
@@ -164,13 +162,12 @@ pub fn generate_quantized_glb<'a>(
     let buffer_offset = bin_content.len();
     let mut buffer = [0u8; BYTE_STRIDE];
 
-    // let scale = points.metadata.scale;
     let offset = points.metadata.offset;
 
     let mut quantized_position_max = [u16::MIN; 3];
     let mut quantized_position_min = [u16::MAX; 3];
 
-    let bits = 14;
+    let bits = 16;
     let common_scale = points.iter().fold(0f32, |result, (x, y, z, _)| {
         result
             .max(x as f32 - offset[0] as f32)
@@ -279,7 +276,11 @@ pub fn generate_quantized_glb<'a>(
         nodes: vec![Node {
             mesh: Some(0),
             translation: offset,
-            // scale,
+            scale: [
+                common_scale as f64,
+                common_scale as f64,
+                common_scale as f64,
+            ],
             ..Default::default()
         }],
         meshes: gltf_meshes,

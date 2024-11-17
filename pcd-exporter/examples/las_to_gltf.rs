@@ -86,7 +86,7 @@ fn main() {
         println!("write GLB: {:?}", glb_path);
         std::fs::create_dir_all(std::path::Path::new(&glb_path).parent().unwrap()).unwrap();
 
-        let glb = generate_glb(transformed).unwrap();
+        let glb = generate_quantized_glb(transformed).unwrap();
 
         let writer = std::fs::File::create(glb_path).unwrap();
         let _ = glb.to_writer_with_alignment(writer, 8);
