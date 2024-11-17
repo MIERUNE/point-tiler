@@ -14,7 +14,7 @@ pub struct PointAttributes {
     pub gps_time: Option<f64>,
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Default)]
 pub struct Color {
     pub r: u16,
     pub g: u16,
@@ -182,7 +182,7 @@ pub struct BoundingVolume {
     pub max: [f64; 3],
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Default)]
 pub struct Metadata {
     pub point_count: usize,
     pub bounding_volume: BoundingVolume,

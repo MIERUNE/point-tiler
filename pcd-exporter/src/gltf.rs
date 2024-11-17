@@ -5,7 +5,7 @@ use cesiumtiles_gltf_json::{
     Accessor, AccessorType, Buffer, BufferView, BufferViewTarget, ComponentType, Gltf, Mesh,
     MeshPrimitive, Node, Scene,
 };
-use pcd_core::pointcloud::point::{Color, Point, PointCloud};
+use pcd_core::pointcloud::point::PointCloud;
 
 pub fn quantize_unsigned_norm(value: f32, bits: i32) -> i32 {
     let max_value = (1i32 << bits) - 1i32;
