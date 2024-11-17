@@ -31,36 +31,39 @@ impl Parser for LasParser {
         let start = std::time::Instant::now();
         let mut points = Vec::new();
 
-        let mut reader = Reader::from_path(&self.filenames[0]).unwrap();
-        for las_point in reader.points() {
-            let las_point = las_point.unwrap();
+        for filename in &self.filenames {
+            println!("Reading file: {:?}", filename);
+            let mut reader = Reader::from_path(filename).unwrap();
+            for las_point in reader.points() {
+                let las_point = las_point.unwrap();
 
-            let color = las_point.color.map(|c| Color {
-                r: c.red,
-                g: c.green,
-                b: c.blue,
-            });
+                let color = las_point.color.map(|c| Color {
+                    r: c.red,
+                    g: c.green,
+                    b: c.blue,
+                });
 
-            let attributes = PointAttributes {
-                intensity: Some(las_point.intensity),
-                return_number: Some(las_point.return_number),
-                classification: Some(format!("{:?}", las_point.classification)),
-                scanner_channel: Some(las_point.user_data),
-                scan_angle: Some(las_point.scan_angle),
-                user_data: Some(las_point.user_data),
-                point_source_id: Some(las_point.point_source_id),
-                gps_time: Some(las_point.gps_time.unwrap_or(0.0)),
-            };
+                let attributes = PointAttributes {
+                    intensity: Some(las_point.intensity),
+                    return_number: Some(las_point.return_number),
+                    classification: Some(format!("{:?}", las_point.classification)),
+                    scanner_channel: Some(las_point.user_data),
+                    scan_angle: Some(las_point.scan_angle),
+                    user_data: Some(las_point.user_data),
+                    point_source_id: Some(las_point.point_source_id),
+                    gps_time: Some(las_point.gps_time.unwrap_or(0.0)),
+                };
 
-            let point = Point {
-                x: las_point.x,
-                y: las_point.y,
-                z: las_point.z,
-                color: color.unwrap_or(Color { r: 0, g: 0, b: 0 }),
-                attributes,
-            };
+                let point = Point {
+                    x: las_point.x,
+                    y: las_point.y,
+                    z: las_point.z,
+                    color: color.unwrap_or(Color { r: 0, g: 0, b: 0 }),
+                    attributes,
+                };
 
-            points.push(point);
+                points.push(point);
+            }
         }
 
         let point_cloud = PointCloud::new(points, self.epsg);

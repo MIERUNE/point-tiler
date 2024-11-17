@@ -19,10 +19,16 @@ use pcd_transformer::{
 use projection_transform::cartesian::geodetic_to_geocentric;
 
 fn main() {
-    let input_files = vec![PathBuf::from(
-        "/Users/satoru/Downloads/09LD1885.las".to_string(),
-        // "pcd-exporter/examples/data/sample.las".to_string(),
-    )];
+    let input_files = vec![
+        PathBuf::from("/Users/satoru/Downloads/09LD1895.las".to_string()),
+        PathBuf::from("/Users/satoru/Downloads/09LD1875.las".to_string()),
+        PathBuf::from("/Users/satoru/Downloads/09LD1894.las".to_string()),
+        PathBuf::from("/Users/satoru/Downloads/09LD1874.las".to_string()),
+        PathBuf::from("/Users/satoru/Downloads/09LD1885.las".to_string()),
+        PathBuf::from("/Users/satoru/Downloads/09LD1865.las".to_string()),
+        PathBuf::from("/Users/satoru/Downloads/09LD1864.las".to_string()),
+        PathBuf::from("/Users/satoru/Downloads/09LD1884.las".to_string()),
+    ];
     let output_path = PathBuf::from(
         "/Users/satoru/Downloads/plateau/plateau-tutorial/output/3dtiles_tokyo_pointcloud",
     );
