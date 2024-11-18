@@ -1,5 +1,5 @@
 use std::{
-    sync::{mpsc::channel, Arc},
+    sync::{mpsc, Arc},
     thread,
 };
 
@@ -83,7 +83,7 @@ impl ProjectionTransform {
 
         match self.output_epsg {
             EPSG_WGS84_GEOGRAPHIC_3D => {
-                let (tx, rx) = channel();
+                let (tx, rx) = mpsc::sync_channel(2000);
                 let num_threads = 8;
                 let chunk_size = (point_cloud.points.len() + num_threads - 1) / num_threads;
 
@@ -125,6 +125,8 @@ impl ProjectionTransform {
 
                     handles.push(handle);
                 }
+
+                drop(tx);
 
                 for processed_point in rx {
                     points.push(processed_point);

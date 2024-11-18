@@ -1,4 +1,8 @@
-use std::collections::HashMap;
+use std::{
+    collections::HashMap,
+    sync::{Arc, Mutex},
+    thread,
+};
 
 use pcd_core::pointcloud::point::{Point, PointCloud};
 use tinymvt::TileZXY;
@@ -34,24 +38,49 @@ pub fn pointcloud_to_tiles(
     min_zoom: u8,
     max_zoom: u8,
 ) -> Vec<(TileZXY, PointCloud)> {
-    let mut tile_point_clouds: HashMap<TileZXY, Vec<Point>> = HashMap::new();
+    let tile_point_clouds = Arc::new(Mutex::new(HashMap::<TileZXY, Vec<Point>>::new()));
+    let num_threads = 8;
+    let chunk_size = (pointcloud.points.len() + num_threads - 1) / num_threads;
 
-    for point in &pointcloud.points {
-        for z in min_zoom..=max_zoom {
-            let (zoom, tile_x, tile_y) = tiling::scheme::zxy_from_lng_lat(z, point.x, point.y);
-            let tile_coords = (zoom, tile_x, tile_y);
+    let mut handles = Vec::new();
 
-            tile_point_clouds
-                .entry(tile_coords)
-                .or_default()
-                .push(point.clone());
-        }
+    for chunk in pointcloud.points.chunks(chunk_size) {
+        let tile_point_clouds = Arc::clone(&tile_point_clouds);
+        let chunk = chunk.to_vec();
+
+        let handle = thread::spawn(move || {
+            let mut local_map = HashMap::<TileZXY, Vec<Point>>::new();
+            for point in chunk {
+                for z in min_zoom..=max_zoom {
+                    let (zoom, tile_x, tile_y) =
+                        tiling::scheme::zxy_from_lng_lat(z, point.x, point.y);
+                    let tile_coords = (zoom, tile_x, tile_y);
+                    local_map
+                        .entry(tile_coords)
+                        .or_default()
+                        .push(point.clone());
+                }
+            }
+            let mut global_map = tile_point_clouds.lock().unwrap();
+            for (key, points) in local_map {
+                global_map.entry(key).or_default().extend(points);
+            }
+        });
+        handles.push(handle);
+    }
+
+    for handle in handles {
+        handle.join().unwrap();
     }
 
     let mut result = Vec::new();
+    let epsg = pointcloud.metadata.epsg;
 
+    let tile_point_clouds = Arc::try_unwrap(tile_point_clouds)
+        .unwrap()
+        .into_inner()
+        .unwrap();
     for ((z, x, y), points) in tile_point_clouds {
-        let epsg = pointcloud.metadata.epsg;
         let tile_pointcloud = PointCloud::new(points, epsg);
         result.push(((z, x, y), tile_pointcloud));
     }

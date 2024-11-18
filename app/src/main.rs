@@ -78,6 +78,7 @@ fn main() {
     let output_path = PathBuf::from(args.output);
     std::fs::create_dir_all(&output_path).unwrap();
 
+    log::info!("Start processing...");
     let las_parser_provider = LasParserProvider {
         filenames: input_files,
         epsg: args.epsg,
@@ -86,23 +87,31 @@ fn main() {
     let provider = las_parser_provider;
     let parser = provider.get_parser();
     let point_cloud = parser.parse().unwrap();
-    log::info!("first point: {:?}", point_cloud.points[0]);
+    log::info!("Finished parsing");
+    log::info!(
+        "Number of points: {num_points}",
+        num_points = point_cloud.points.len()
+    );
 
+    log::info!("Start transforming...");
     let transform_builder = PointCloudTransformBuilder::new(output_epsg);
     let transformer = PointCloudTransformer::new(Box::new(transform_builder));
 
     let transformed = transformer.execute(point_cloud.clone());
+    log::info!("Finished transforming");
     log::info!("Transformed first point: {:?}", transformed.points[0]);
-
     log::info!(
         "Number of points: {num_points}",
         num_points = transformed.points.len()
     );
 
+    log::info!("Start tiling...");
     let min_zoom = args.min;
     let max_zoom = args.max;
     let tiled_pointcloud = pointcloud_to_tiles(&transformed, min_zoom, max_zoom);
+    log::info!("Finished tiling");
 
+    log::info!("Start exporting...");
     let mut tile_contents: Vec<TileContent> = tiled_pointcloud
         .into_par_iter()
         .map(|(tile_coords, pointcloud)| {
@@ -162,6 +171,7 @@ fn main() {
             tile_content
         })
         .collect();
+    log::info!("Finished exporting");
 
     let mut tree = TileTree::default();
     for content in tile_contents.drain(..) {

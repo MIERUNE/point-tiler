@@ -1,4 +1,4 @@
-use std::sync::mpsc::channel;
+use std::sync::mpsc;
 use std::thread;
 use std::{error::Error, path::PathBuf};
 
@@ -32,7 +32,7 @@ impl Parser for LasParser {
     fn parse(&self) -> Result<PointCloud, Box<dyn Error>> {
         let mut points = Vec::new();
 
-        let (tx, rx) = channel();
+        let (tx, rx) = mpsc::sync_channel(2000);
 
         let handles: Vec<_> = self
             .filenames
@@ -76,9 +76,13 @@ impl Parser for LasParser {
 
                         tx.send(point).unwrap();
                     }
+
+                    drop(tx);
                 })
             })
             .collect();
+
+        drop(tx);
 
         for point in rx {
             points.push(point);
