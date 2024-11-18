@@ -34,23 +34,23 @@ pub fn pointcloud_to_tiles(
     min_zoom: u8,
     max_zoom: u8,
 ) -> Vec<(TileZXY, PointCloud)> {
-    let mut tile_pointclouds: HashMap<TileZXY, Vec<Point>> = HashMap::new();
+    let mut tile_point_clouds: HashMap<TileZXY, Vec<Point>> = HashMap::new();
 
     for point in &pointcloud.points {
         for z in min_zoom..=max_zoom {
             let (zoom, tile_x, tile_y) = tiling::scheme::zxy_from_lng_lat(z, point.x, point.y);
             let tile_coords = (zoom, tile_x, tile_y);
 
-            tile_pointclouds
+            tile_point_clouds
                 .entry(tile_coords)
-                .or_insert_with(Vec::new)
+                .or_default()
                 .push(point.clone());
         }
     }
 
     let mut result = Vec::new();
 
-    for ((z, x, y), points) in tile_pointclouds {
+    for ((z, x, y), points) in tile_point_clouds {
         let epsg = pointcloud.metadata.epsg;
         let tile_pointcloud = PointCloud::new(points, epsg);
         result.push(((z, x, y), tile_pointcloud));
