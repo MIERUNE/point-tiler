@@ -4,6 +4,7 @@ version.workspace = true
 edition = "2021"
 
 [dependencies]
+crossbeam = "0.8.4"
 pcd-core = { path = "../pcd-core" }
 projection-transform = { path = "../projection-transform" }
 rayon = "1.10.0"
