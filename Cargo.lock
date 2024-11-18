@@ -565,6 +565,7 @@ dependencies = [
  "pcd-parser",
  "pcd-transformer",
  "projection-transform",
+ "rayon",
  "serde",
  "serde_json",
  "tinymvt",
@@ -578,6 +579,7 @@ dependencies = [
  "las",
  "pcd-core",
  "projection-transform",
+ "rayon",
 ]
 
 [[package]]
@@ -588,6 +590,7 @@ dependencies = [
  "pcd-exporter",
  "pcd-parser",
  "projection-transform",
+ "rayon",
 ]
 
 [[package]]
