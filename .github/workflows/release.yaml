@@ -35,8 +35,8 @@ jobs:
 
       - name: Rename artifact
         run: |
-          mv ./app/target/${{ matrix.job.target }}/release/app \
-             ./app/target/${{ matrix.job.target }}/release/${{ env.PROJECT_NAME }}-${{ github.ref_name }}-${{ matrix.job.target }}${{ matrix.job.extension }}
+          mv ./target/${{ matrix.job.target }}/release/app \
+             ./target/${{ matrix.job.target }}/release/${{ env.PROJECT_NAME }}-${{ github.ref_name }}-${{ matrix.job.target }}${{ matrix.job.extension }}
 
       - name: Create Release
         uses: ncipollo/release-action@v1
