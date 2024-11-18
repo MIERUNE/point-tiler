@@ -1,4 +1,7 @@
-use std::sync::Arc;
+use std::{
+    sync::{mpsc::channel, Arc},
+    thread,
+};
 
 use pcd_core::pointcloud::point::{Point, PointCloud};
 use projection_transform::{crs::*, jprect::JPRZone, vshift::Jgd2011ToWgs84};
@@ -77,30 +80,65 @@ impl ProjectionTransform {
         rectangular: Option<EpsgCode>,
     ) -> PointCloud {
         let mut points = vec![];
+
         match self.output_epsg {
             EPSG_WGS84_GEOGRAPHIC_3D => {
-                for (x, y, z, point) in point_cloud.iter() {
-                    let (lng, lat, height) = if let Some(input_epsg) = rectangular {
-                        Self::rectangular_to_lnglat(x, y, z, input_epsg)
-                    } else {
-                        (x, y, z)
-                    };
+                let (tx, rx) = channel();
+                let num_threads = 8;
+                let chunk_size = (point_cloud.points.len() + num_threads - 1) / num_threads;
 
-                    let (lng, lat, height) = self.jgd2wgs.convert(lng, lat, height);
+                let mut handles = vec![];
 
-                    points.push(Point {
-                        x: lng,
-                        y: lat,
-                        z: height,
-                        color: point.color.clone(),
-                        attributes: point.attributes.clone(),
+                let jgd2wgs_arc = Arc::new(self.jgd2wgs.clone());
+
+                for chunk in point_cloud.points.chunks(chunk_size) {
+                    let tx = tx.clone();
+                    let jgd2wgs_arc = Arc::clone(&jgd2wgs_arc);
+
+                    let chunk = chunk.to_vec();
+
+                    let handle = thread::spawn(move || {
+                        for point in chunk {
+                            let x = point.x;
+                            let y = point.y;
+                            let z = point.z;
+
+                            let (lng, lat, height) = if let Some(input_epsg) = rectangular {
+                                Self::rectangular_to_lnglat(x, y, z, input_epsg)
+                            } else {
+                                (x, y, z)
+                            };
+
+                            let (lng, lat, height) = jgd2wgs_arc.convert(lng, lat, height);
+
+                            let new_point = Point {
+                                x: lng,
+                                y: lat,
+                                z: height,
+                                color: point.color.clone(),
+                                attributes: point.attributes.clone(),
+                            };
+
+                            tx.send(new_point).unwrap();
+                        }
                     });
+
+                    handles.push(handle);
+                }
+
+                for processed_point in rx {
+                    points.push(processed_point);
+                }
+
+                for handle in handles {
+                    handle.join().unwrap();
                 }
             }
             _ => {
                 panic!("Unsupported output CRS: {}", self.output_epsg);
             }
-        };
+        }
+
         PointCloud::new(points, self.output_epsg)
     }
 }
