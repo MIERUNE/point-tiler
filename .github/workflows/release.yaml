@@ -38,13 +38,10 @@ jobs:
           mv ./target/${{ matrix.job.target }}/release/app \
              ./target/${{ matrix.job.target }}/release/${{ env.PROJECT_NAME }}-${{ github.ref_name }}-${{ matrix.job.target }}${{ matrix.job.extension }}
 
-      - name: Create Release
-        uses: ncipollo/release-action@v1
+      - name: Upload artifact to release
+        uses: actions/upload-release-asset@v1
         with:
-          token: ${{ secrets.GITHUB_TOKEN }}
-          name: Release ${{ github.ref_name }}
-          tag: ${{ github.ref_name }}
-          artifacts: ./app/target/${{ matrix.job.target }}/release/${{ env.PROJECT_NAME }}-${{ github.ref_name }}-${{ matrix.job.target }}${{ matrix.job.extension }}
-          artifactContentType: application/octet-stream
-          draft: false
-          prerelease: false
+          upload_url: ${{ github.event.release.upload_url }}
+          asset_path: ./target/${{ matrix.job.target }}/release/${{ env.PROJECT_NAME }}-${{ github.ref_name }}-${{ matrix.job.target }}${{ matrix.job.extension }}
+          asset_name: ${{ env.PROJECT_NAME }}-${{ github.ref_name }}-${{ matrix.job.target }}${{ matrix.job.extension }}
+          asset_content_type: application/octet-stream
