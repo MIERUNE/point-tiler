@@ -5,16 +5,18 @@ on:
 
 jobs:
   release:
+
+    runs-on: ${{ matrix.job.os }}
     env:
       PROJECT_NAME: point_tiler
-    permissions:
-      contents: write
     strategy:
       fail-fast: false
       matrix:
         job:
-          - { os: macos-latest, target: aarch64-apple-darwin, extension: "" }
-    runs-on: ${{ matrix.job.os }}
+          - {os: macos-latest, target: x86_64-apple-darwin, extension: ''}
+          - {os: macos-latest, target: aarch64-apple-darwin, extension: ''}
+    permissions:
+      contents: write
 
     steps:
       - name: Checkout repository
@@ -26,26 +28,26 @@ jobs:
           targets: x86_64-apple-darwin,aarch64-apple-darwin
 
       - name: Rust cache
-        uses: swatinem/rust-cache@v2
+        uses: Swatinem/rust-cache@v2
         with:
-          workspaces: "./app -> target"
+          workspaces: ./app
 
       - name: Build
-        uses: actions-rs/cargo@v1
-        with:
-          use-cross: ${{ matrix.job.use-cross }}
-          command: build
-          args: --release --target ${{ matrix.job.target }}
+        run: cargo build --release --target ${{ matrix.job.target }}
+        working-directory: ./app
 
-      - name: Rename artifacts
-        shell: bash
+      - name: Rename artifact
         run: |
-          mv target/${{ matrix.job.target }}/release/${{ env.PROJECT_NAME }}-${{ github.ref_name }}-${{ matrix.job.target }}${{ matrix.job.extension }}}
+          mv ./app/target/${{ matrix.job.target }}/release/${{ env.PROJECT_NAME }} \
+             ./app/target/${{ matrix.job.target }}/release/${{ env.PROJECT_NAME }}-${{ github.ref_name }}-${{ matrix.job.target }}${{ matrix.job.extension }}
 
-      - name: Release
-        uses: softprops/action-gh-release@v1
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      - name: Create Release
+        uses: ncipollo/release-action@v1
         with:
-          files: |
-            target/${{ matrix.job.target }}/release/${{ env.PROJECT_NAME }}-${{ github.ref_name }}-${{ matrix.job.target }}${{ matrix.job.extension }}
+          token: ${{ secrets.GITHUB_TOKEN }}
+          name: Release ${{ github.ref_name }}
+          tag: ${{ github.ref_name }}
+          artifacts: ./app/target/${{ matrix.job.target }}/release/${{ env.PROJECT_NAME }}-${{ github.ref_name }}-${{ matrix.job.target }}${{ matrix.job.extension }}
+          artifactContentType: application/octet-stream
+          draft: false
+          prerelease: false
