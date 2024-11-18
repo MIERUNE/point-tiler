@@ -1,8 +1,4 @@
-use std::{
-    collections::HashMap,
-    sync::{Arc, Mutex},
-    thread,
-};
+use std::{collections::HashMap, sync::mpsc, thread};
 
 use pcd_core::pointcloud::point::{Point, PointCloud};
 use tinymvt::TileZXY;
@@ -38,14 +34,15 @@ pub fn pointcloud_to_tiles(
     min_zoom: u8,
     max_zoom: u8,
 ) -> Vec<(TileZXY, PointCloud)> {
-    let tile_point_clouds = Arc::new(Mutex::new(HashMap::<TileZXY, Vec<Point>>::new()));
     let num_threads = 8;
     let chunk_size = (pointcloud.points.len() + num_threads - 1) / num_threads;
+
+    let (tx, rx) = mpsc::sync_channel(2000);
 
     let mut handles = Vec::new();
 
     for chunk in pointcloud.points.chunks(chunk_size) {
-        let tile_point_clouds = Arc::clone(&tile_point_clouds);
+        let tx = tx.clone();
         let chunk = chunk.to_vec();
 
         let handle = thread::spawn(move || {
@@ -61,25 +58,27 @@ pub fn pointcloud_to_tiles(
                         .push(point.clone());
                 }
             }
-            let mut global_map = tile_point_clouds.lock().unwrap();
-            for (key, points) in local_map {
-                global_map.entry(key).or_default().extend(points);
-            }
+            tx.send(local_map).unwrap();
         });
         handles.push(handle);
+    }
+
+    drop(tx);
+
+    let mut tile_point_clouds: HashMap<TileZXY, Vec<Point>> = HashMap::new();
+    for received_map in rx {
+        for (key, points) in received_map {
+            tile_point_clouds.entry(key).or_default().extend(points);
+        }
     }
 
     for handle in handles {
         handle.join().unwrap();
     }
 
-    let mut result = Vec::new();
     let epsg = pointcloud.metadata.epsg;
+    let mut result = Vec::new();
 
-    let tile_point_clouds = Arc::try_unwrap(tile_point_clouds)
-        .unwrap()
-        .into_inner()
-        .unwrap();
     for ((z, x, y), points) in tile_point_clouds {
         let tile_pointcloud = PointCloud::new(points, epsg);
         result.push(((z, x, y), tile_pointcloud));
