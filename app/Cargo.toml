@@ -6,21 +6,19 @@ authors.workspace = true
 
 [dependencies]
 pcd-parser = { path = "../pcd-parser" }
-rayon = "1.10.0"
-serde = { version = "1.0.214", features = ["derive"] }
-clap = { version = "4.5.20", features = ["derive", "string"] }
-thiserror = "1.0.65"
-bitcode = "0.6.3"
 cesiumtiles-gltf = { path = "../cesiumtiles-gltf" }
 cesiumtiles-gltf-json = { path = "../cesiumtiles-gltf/cesiumtiles-gltf-json" }
+pcd-exporter = { path = "../pcd-exporter" }
+pcd-core = { path = "../pcd-core" }
+projection-transform = { path = "../projection-transform" }
+pcd-transformer = { path = "../pcd-transformer" }
 cesiumtiles = { git = "https://github.com/MIERUNE/cesiumtiles-rs.git" }
-serde_json = { version = "1.0.132", features = ["indexmap"] }
-indexmap = { version = "2.6.0", features = ["serde", "rayon"] }
-kv-extsort = { git = "https://github.com/MIERUNE/kv-extsort-rs.git" }
+rayon = "1.10.0"
+clap = { version = "4.5.20", features = ["derive", "string"] }
+thiserror = "1.0.65"
 chrono = "0.4.38"
-flate2 = "1.0.34"
-glob = "0.3.1"
-byteorder = "1.5.0"
-log = { version = "0.4.22" }
-url = "2.5.2"
+log = "0.4.22"
 stretto = "0.8.4"
+env_logger = "0.11.5"
+serde = { version = "1.0.215", features = ["derive"] }
+serde_json = "1.0.133"

@@ -28,11 +28,9 @@ pub struct LasParser {
 
 impl Parser for LasParser {
     fn parse(&self) -> Result<PointCloud, Box<dyn Error>> {
-        let start = std::time::Instant::now();
         let mut points = Vec::new();
 
         for filename in &self.filenames {
-            println!("Reading file: {:?}", filename);
             let mut reader = Reader::from_path(filename).unwrap();
             for las_point in reader.points() {
                 let las_point = las_point.unwrap();
@@ -67,8 +65,6 @@ impl Parser for LasParser {
         }
 
         let point_cloud = PointCloud::new(points, self.epsg);
-
-        println!("Build PointCloud time: {:?}", start.elapsed());
 
         Ok(point_cloud)
     }
