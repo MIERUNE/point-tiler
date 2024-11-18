@@ -56,7 +56,11 @@ impl Parser for LasParser {
                     x: las_point.x,
                     y: las_point.y,
                     z: las_point.z,
-                    color: color.unwrap_or(Color { r: 0, g: 0, b: 0 }),
+                    color: color.unwrap_or(Color {
+                        r: 65535,
+                        g: 65535,
+                        b: 65535,
+                    }),
                     attributes,
                 };
 
