@@ -170,7 +170,9 @@ name = "cesiumtiles-gltf"
 version = "0.1.0"
 dependencies = [
  "byteorder",
+ "cesiumtiles-gltf-json",
  "glob",
+ "serde_json",
 ]
 
 [[package]]
