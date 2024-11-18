@@ -145,9 +145,9 @@ impl Parser for CsvParser {
                     .map_err(|e| format!("Failed to parse 'z': {}", e))?;
 
                 let color = Color {
-                    r: parse_optional_field(&record, &field_mapping, "r")?.unwrap_or(0),
-                    g: parse_optional_field(&record, &field_mapping, "g")?.unwrap_or(0),
-                    b: parse_optional_field(&record, &field_mapping, "b")?.unwrap_or(0),
+                    r: parse_optional_field(&record, &field_mapping, "r")?.unwrap_or(65535),
+                    g: parse_optional_field(&record, &field_mapping, "g")?.unwrap_or(65535),
+                    b: parse_optional_field(&record, &field_mapping, "b")?.unwrap_or(65535),
                 };
 
                 let attributes = PointAttributes {

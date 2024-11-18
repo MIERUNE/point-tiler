@@ -22,7 +22,7 @@ fn main() {
     let start = std::time::Instant::now();
 
     let input_files = vec![PathBuf::from(
-        "pcd-exporter/examples/data/sample.las".to_string(),
+        "pcd-exporter/examples/data/colored_sample.las".to_string(),
     )];
     let output_path = PathBuf::from("pcd-exporter/examples/data/output");
     std::fs::create_dir_all(&output_path).unwrap();
