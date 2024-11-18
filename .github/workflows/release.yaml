@@ -5,15 +5,16 @@ on:
 
 jobs:
   release:
+    env:
+      PROJECT_NAME: point_tiler
     permissions:
       contents: write
     strategy:
       fail-fast: false
       matrix:
-        settings:
-          - platform: macos-latest
-            args: '--target universal-apple-darwin -- --profile release-lto'
-    runs-on: ${{ matrix.settings.platform }}
+        job:
+          - { os: macos-latest, target: aarch64-apple-darwin, extension: "" }
+    runs-on: ${{ matrix.job.os }}
 
     steps:
       - name: Checkout repository
@@ -27,15 +28,24 @@ jobs:
       - name: Rust cache
         uses: swatinem/rust-cache@v2
         with:
-          workspaces: "./src-tauri -> target"
+          workspaces: "./app -> target"
 
-      - name: Build the app
-        uses: tauri-apps/tauri-action@v0
+      - name: Build
+        uses: actions-rs/cargo@v1
+        with:
+          use-cross: ${{ matrix.job.use-cross }}
+          command: build
+          args: --release --target ${{ matrix.job.target }}
+
+      - name: Rename artifacts
+        shell: bash
+        run: |
+          mv target/${{ matrix.job.target }}/release/${{ env.PROJECT_NAME }}{,-${{ github.ref_name }}-${{ matrix.job.target }}${{ matrix.job.extension }}}
+
+      - name: Release
+        uses: softprops/action-gh-release@v1
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         with:
-          args: ${{ matrix.settings.args }}  # args for tauri build
-          tagName: ${{ github.event.release.tag_name }}
-          releaseName: "Point Tiler v__VERSION__"
-          releaseDraft: true
-          prerelease: false
+          files: |
+            target/${{ matrix.job.target }}/release/${{ env.PROJECT_NAME }}-${{ github.ref_name }}-${{ matrix.job.target }}${{ matrix.job.extension }}

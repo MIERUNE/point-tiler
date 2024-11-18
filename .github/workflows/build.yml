@@ -1,4 +1,4 @@
-name: Build Tauri App
+name: Build App
 
 on:
   push:
@@ -30,7 +30,7 @@ jobs:
         run: |
           sudo apt-get update
           sudo apt install -y libwebkit2gtk-4.1-dev libxdo-dev libssl-dev libayatana-appindicator3-dev librsvg2-dev
-      - name: Make Tauri build destination
+      - name: Make build destination
         run: mkdir -p app/build
       - name: Build App
         run: cargo build --verbose --package app
