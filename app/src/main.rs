@@ -74,10 +74,12 @@ fn main() {
 
     let start = std::time::Instant::now();
 
+    log::info!("start processing...");
     let input_files = args.input.iter().map(PathBuf::from).collect::<Vec<_>>();
     let output_path = PathBuf::from(args.output);
     std::fs::create_dir_all(&output_path).unwrap();
 
+    log::info!("start parsing...");
     let las_parser_provider = LasParserProvider {
         filenames: input_files,
         epsg: args.epsg,
@@ -86,32 +88,25 @@ fn main() {
     let provider = las_parser_provider;
     let parser = provider.get_parser();
     let point_cloud = parser.parse().unwrap();
-    log::info!("first point: {:?}", point_cloud.points[0]);
+    log::info!("finish parsing");
 
+    log::info!("start transforming...");
     let transform_builder = PointCloudTransformBuilder::new(output_epsg);
     let transformer = PointCloudTransformer::new(Box::new(transform_builder));
 
     let transformed = transformer.execute(point_cloud.clone());
-    log::info!("Transformed first point: {:?}", transformed.points[0]);
-
-    log::info!(
-        "Number of points: {num_points}",
-        num_points = transformed.points.len()
-    );
+    log::info!("Finish transforming");
 
     let min_zoom = args.min;
     let max_zoom = args.max;
+    log::info!("start tiling...");
     let tiled_pointcloud = pointcloud_to_tiles(&transformed, min_zoom, max_zoom);
+    log::info!("Finish tiling");
 
+    log::info!("start exporting tiles...");
     let mut tile_contents: Vec<TileContent> = tiled_pointcloud
         .into_par_iter()
         .map(|(tile_coords, pointcloud)| {
-            log::info!("Tile Coords: {:?}", tile_coords);
-            log::info!(
-                "  Number of points: {num_points}",
-                num_points = pointcloud.points.len()
-            );
-
             let tile_content = make_tile_content(&tile_coords, &pointcloud);
 
             let mut points = vec![];
@@ -129,21 +124,13 @@ fn main() {
                 });
             }
             let transformed = PointCloud::new(points, output_epsg);
-            log::info!("  transformed first point: {:?}", transformed.points[0]);
-            log::info!("  offset: {:?}", transformed.metadata.offset);
 
             let geometric_error = geometric_error(tile_coords.0, tile_coords.2);
-            log::info!("  Geometric error: {}", geometric_error);
 
             let voxel_size = geometric_error * 0.1;
-            log::info!("  Voxel size: {}", voxel_size);
 
             let decimetor = VoxelDecimator { voxel_size };
             let decimated_points = decimetor.decimate(&transformed.points);
-            log::info!(
-                "  Number of decimated points: {num_points}",
-                num_points = decimated_points.len()
-            );
             let decimated = PointCloud::new(decimated_points, output_epsg);
 
             let glb_path = format!(
@@ -151,7 +138,7 @@ fn main() {
                 output_path.to_string_lossy(),
                 tile_content.content_path
             );
-            log::info!("  write GLB: {:?}", glb_path);
+            log::info!("write GLB: {:?}", glb_path);
             std::fs::create_dir_all(std::path::Path::new(&glb_path).parent().unwrap()).unwrap();
 
             let glb = generate_quantized_glb(decimated).unwrap();
@@ -188,4 +175,6 @@ fn main() {
     .unwrap();
 
     log::info!("Elapsed: {:?}", start.elapsed());
+
+    log::info!("Finish processing");
 }
