@@ -1,0 +1,41 @@
+name: Release
+on:
+  release:
+    types: [published]
+
+jobs:
+  release:
+    permissions:
+      contents: write
+    strategy:
+      fail-fast: false
+      matrix:
+        settings:
+          - platform: macos-latest
+            args: '--target universal-apple-darwin -- --profile release-lto'
+    runs-on: ${{ matrix.settings.platform }}
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Rust setup
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: x86_64-apple-darwin,aarch64-apple-darwin
+
+      - name: Rust cache
+        uses: swatinem/rust-cache@v2
+        with:
+          workspaces: "./src-tauri -> target"
+
+      - name: Build the app
+        uses: tauri-apps/tauri-action@v0
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        with:
+          args: ${{ matrix.settings.args }}  # args for tauri build
+          tagName: ${{ github.event.release.tag_name }}
+          releaseName: "Point Tiler v__VERSION__"
+          releaseDraft: true
+          prerelease: false
