@@ -29,12 +29,9 @@ jobs:
 
       - name: Rust cache
         uses: Swatinem/rust-cache@v2
-        with:
-          workspaces: ./app
 
       - name: Build
-        run: cargo build --release --target ${{ matrix.job.target }}
-        working-directory: ./app
+        run: cargo build --release --package app --target ${{ matrix.job.target }}
 
       - name: Rename artifact
         run: |
