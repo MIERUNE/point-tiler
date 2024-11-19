@@ -1,3 +1,4 @@
+use std::ffi::OsStr;
 use std::io::Write;
 use std::{
     fs,
@@ -17,6 +18,8 @@ use pcd_exporter::{
     gltf::generate_quantized_glb,
     tiling::{geometric_error, TileContent, TileTree},
 };
+use pcd_parser::parsers::csv::CsvParserProvider;
+use pcd_parser::parsers::{get_extension, Extension};
 use pcd_parser::parsers::{las::LasParserProvider, ParserProvider as _};
 use pcd_transformer::{
     builder::PointCloudTransformBuilder, runner::PointCloudTransformer, Transformer,
@@ -24,6 +27,7 @@ use pcd_transformer::{
 use projection_transform::cartesian::geodetic_to_geocentric;
 
 use clap::Parser;
+use projection_transform::crs::EpsgCode;
 use rayon::iter::{IntoParallelIterator as _, ParallelIterator as _};
 
 #[derive(Parser, Debug)]
@@ -48,6 +52,25 @@ struct Cli {
 
     #[arg(long, default_value_t = 18)]
     max: u8,
+}
+
+fn check_and_get_extension(paths: &[PathBuf]) -> Result<Extension, String> {
+    let mut extensions = vec![];
+    for path in paths.iter() {
+        let extension = path.extension().and_then(OsStr::to_str);
+        match extension {
+            Some(ext) => extensions.push(ext),
+            None => return Err("File extension is not found".to_string()),
+        }
+    }
+    extensions.sort();
+    extensions.dedup();
+
+    if extensions.len() > 1 {
+        return Err("Multiple extensions are not supported".to_string());
+    }
+
+    Ok(get_extension(extensions[0]))
 }
 
 fn main() {
@@ -81,17 +104,48 @@ fn main() {
 
     log::info!("start parsing...");
     let start_local = std::time::Instant::now();
-    let las_parser_provider = LasParserProvider {
-        filenames: input_files,
-        epsg: args.epsg,
+
+    let extension = check_and_get_extension(&input_files).unwrap();
+    let parser = match extension {
+        Extension::Las => {
+            let las_parser_provider = LasParserProvider {
+                filenames: input_files,
+                epsg: args.epsg,
+            };
+            let provider = las_parser_provider;
+            provider.get_parser()
+        }
+        Extension::Laz => {
+            let las_parser_provider = LasParserProvider {
+                filenames: input_files,
+                epsg: args.epsg,
+            };
+            let provider = las_parser_provider;
+            provider.get_parser()
+        }
+        Extension::Csv => {
+            let csv_parser_provider = CsvParserProvider {
+                filenames: input_files,
+                epsg: args.epsg,
+            };
+            let provider = csv_parser_provider;
+            provider.get_parser()
+        }
+        Extension::Txt => {
+            let csv_parser_provider = CsvParserProvider {
+                filenames: input_files,
+                epsg: args.epsg,
+            };
+            let provider = csv_parser_provider;
+            provider.get_parser()
+        }
+        _ => panic!("Unsupported extension"),
     };
-    let output_epsg = 4979;
-    let provider = las_parser_provider;
-    let parser = provider.get_parser();
     let point_cloud = parser.parse().unwrap();
     log::info!("finish parsing in {:?}", start_local.elapsed());
 
     log::info!("start transforming...");
+    let output_epsg = 4979;
     let start_local = std::time::Instant::now();
     let transform_builder = PointCloudTransformBuilder::new(output_epsg);
     let transformer = PointCloudTransformer::new(Box::new(transform_builder));

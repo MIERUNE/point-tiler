@@ -1,6 +1,6 @@
 # Point Tiler
 
-A tool for converting point cloud data into 3D Tiles v1.1.
+A tool for converting point cloud data（las/laz and csv） into 3D Tiles v1.1.
 
 ## Usage
 
