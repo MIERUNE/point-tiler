@@ -50,3 +50,11 @@ For example, the following data is valid.
 -5599.992,-35119.757,3.603,722.000,1.000,1.000,1.000,0.000,1.000,0.000,0.00 0,0.000,0.000,-4.000,0.000,95.000,188552.407,18504.000,20046.000,20817.000
 -5599.992,-35129.327,3.431,505.000,1.000,1.000,1.000,0.000,1.000,0.000,0.00 0,0.000,0.000,-4.000,0.000,95.000,188552.547,18504.000,19789.000,21074.000
 ```
+
+## Functions to be implemented
+
+- [ ] Tiling with Octree
+- [ ] Parallelize intermediate processes
+- [ ] Generate gzip compressed tiles
+- [ ] Assign attributes using EXT_mesh_features
+- [ ] Compress using meshopt
