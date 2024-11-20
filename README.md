@@ -2,6 +2,14 @@
 
 A tool for converting point cloud data (las/laz and csv) into "3D Tiles v1.1".
 
+## install
+
+Rust must be installed. You can easily install it from the following page.
+
+[Getting started](https://www.rust-lang.org/learn/get-started)
+
+After installing Rust, download this repository.
+
 ## Usage
 
 ### LAS/LAZ
@@ -11,6 +19,8 @@ A tool for converting point cloud data (las/laz and csv) into "3D Tiles v1.1".
 - `epsg`: Input the epsg code of the las file. All point clouds are recognized as being in the same coordinate system.
 - `min`: Specify the minimum zoom level you want to output.
 - `max`: Specify the maximum zoom level you want to output.
+
+In the repository root, the following commands can be executed.
 
 ```sh
 cargo run -r -p app -- --input app/examples/data/sample.las \
