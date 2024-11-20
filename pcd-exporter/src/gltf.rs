@@ -31,7 +31,6 @@ pub fn generate_glb<'a>(
     let mut gltf_buffer_views = Vec::new();
     let mut gltf_accessors = Vec::new();
 
-    // TODO: カラーが存在しないデータに対応
     const BYTE_STRIDE: usize = (4 * 3) + (3 + 1);
 
     let buffer_offset = bin_content.len();

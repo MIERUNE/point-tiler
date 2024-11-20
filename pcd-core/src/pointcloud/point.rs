@@ -24,7 +24,6 @@ pub struct Color {
 // LAS data coordinates are expressed in u32 format
 // The actual coordinates are calculated based on a combination of scale and offset, as follows
 // x = (x * scale[0]) + offset[0]
-// TODO: カラーが存在しないデータに対応
 #[derive(Debug, Clone)]
 pub struct Point {
     pub x: f64,

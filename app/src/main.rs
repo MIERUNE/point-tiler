@@ -27,7 +27,6 @@ use pcd_transformer::{
 use projection_transform::cartesian::geodetic_to_geocentric;
 
 use clap::Parser;
-use projection_transform::crs::EpsgCode;
 use rayon::iter::{IntoParallelIterator as _, ParallelIterator as _};
 
 #[derive(Parser, Debug)]
@@ -139,9 +138,15 @@ fn main() {
             let provider = csv_parser_provider;
             provider.get_parser()
         }
-        _ => panic!("Unsupported extension"),
     };
-    let point_cloud = parser.parse().unwrap();
+    let point_cloud = match parser.parse() {
+        Ok(point_cloud) => point_cloud,
+        Err(e) => {
+            log::error!("Failed to parse point cloud: {:?}", e);
+            return;
+        }
+    };
+    // let point_cloud = parser.parse();
     log::info!("finish parsing in {:?}", start_local.elapsed());
 
     log::info!("start transforming...");
