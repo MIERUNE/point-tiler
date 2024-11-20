@@ -2,6 +2,8 @@
 
 A tool for converting point cloud data (las/laz and csv) into "3D Tiles v1.1".
 
+![alt text](images/README_image.png)
+
 ## install
 
 Rust must be installed. You can easily install it from the following page.
@@ -16,7 +18,7 @@ After installing Rust, download this repository.
 
 - `input`: Specify the `.las/.laz/.csv/.txt` file. Multiple files can be input separated by spaces.
 - `output`: Specify the output folder. Output `tileset.json` and glb.
-- `epsg`: Input the epsg code of the las file. All point clouds are recognized as being in the same coordinate system.
+- `epsg`: Input the epsg code of the las file. All point clouds are recognized as being in the same coordinate system.(Currently, only the Japanese plane rectangular coordinate system is supported.)
 - `min`: Specify the minimum zoom level you want to output.
 - `max`: Specify the maximum zoom level you want to output.
 
