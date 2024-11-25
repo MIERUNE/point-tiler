@@ -58,3 +58,30 @@ For example, the following data is valid.
 - [ ] Generate gzip compressed tiles
 - [ ] Assign attributes using EXT_mesh_features
 - [ ] Compress using meshopt
+
+## License
+
+[MIT License](./LICENSE)
+
+## Authors
+
+Satoru Nishio (@nokonoko1203) - Original Author
+And all contributors
+
+## Use of Third-Party Source Code
+
+This project incorporates and modifies source code from the following third-party projects:
+
+- [PLATEAU GIS Converter](https://github.com/MIERUNE/plateau-gis-converter)
+  - Repository: [PLATEAU GIS Converter](https://github.com/MIERUNE/plateau-gis-converter)
+  - Original License: [MIT License](https://github.com/MIERUNE/plateau-gis-converter/blob/main/LICENSE)
+
+### Modifications Made
+
+We have made the following modifications to the source code from [PLATEAU GIS Converter](https://github.com/MIERUNE/plateau-gis-converter):
+
+- [nusamai-projection](https://github.com/MIERUNE/plateau-gis-converter/tree/main/nusamai-projection) is imported as [projection-transform](./projection-transform/).
+- [nusamai-gltf](https://github.com/MIERUNE/plateau-gis-converter/tree/main/nusamai-gltf) is included as [cesiumtiles-gltf](./cesiumtiles-gltf/).
+- [nusamai/src/transformer/transform/projection.rs](https://github.com/MIERUNE/plateau-gis-converter/blob/main/nusamai/src/transformer/transform/projection.rs) is included in part of [pcd-transformer](pcd-transformer/src/transform/projection.rs)
+
+The modified code retains its original copyright and is used in accordance with the MIT License. For details, see the LICENSE file.
