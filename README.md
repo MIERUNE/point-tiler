@@ -65,8 +65,9 @@ For example, the following data is valid.
 
 ## Authors
 
-Satoru Nishio (@nokonoko1203) - Original Author
-And all contributors
+- Satoru Nishio (@nokonoko1203)
+
+- And all contributors
 
 ## Use of Third-Party Source Code
 
