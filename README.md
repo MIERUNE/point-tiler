@@ -6,6 +6,15 @@ A tool for converting point cloud data (las/laz and csv) into "3D Tiles v1.1".
 
 ## install
 
+Enter the following command.
+
+```sh
+curl -sSf https://raw.githubusercontent.com/MIERUNE/point-tiler/main/scripts/install.sh | bash
+export PATH="/usr/local/bin/point_tiler:$PATH"
+```
+
+### for developer
+
 Rust must be installed. You can easily install it from the following page.
 
 [Getting started](https://www.rust-lang.org/learn/get-started)
