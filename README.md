@@ -12,6 +12,9 @@ Enter the following command.
 curl -sSf https://raw.githubusercontent.com/MIERUNE/point-tiler/main/install.sh | bash
 ```
 
+Currently, it is not available on Windows.
+However, if Rust is installed and Cargo is available, it is possible to run it using the `cargo` command.
+
 ### for developer
 
 Rust must be installed. You can easily install it from the following page.
@@ -33,7 +36,7 @@ After installing Rust, download this repository.
 In the repository root, the following commands can be executed.
 
 ```sh
-cargo run -r -p app -- --input app/examples/data/sample.las \
+point_tiler --input app/examples/data/sample.las \
     --output app/examples/data/output \
     --epsg 6677 \
     --min 15 \
