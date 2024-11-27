@@ -9,8 +9,7 @@ A tool for converting point cloud data (las/laz and csv) into "3D Tiles v1.1".
 Enter the following command.
 
 ```sh
-curl -sSf https://raw.githubusercontent.com/MIERUNE/point-tiler/main/scripts/install.sh | bash
-export PATH="/usr/local/bin/point_tiler:$PATH"
+curl -sSf https://raw.githubusercontent.com/MIERUNE/point-tiler/main/install.sh | bash
 ```
 
 ### for developer
