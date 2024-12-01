@@ -2,22 +2,26 @@ use std::fmt;
 
 // 境界ボリュームを表す構造体（軸に揃ったバウンディングボックス）
 #[derive(Clone, Debug, Default, PartialEq)]
-struct BoundingVolume {
-    min: [f64; 3],
-    max: [f64; 3],
+pub struct BoundingVolume {
+    pub min: [f64; 3],
+    pub max: [f64; 3],
 }
 
 // オクツリーのノードを表す構造体
 #[derive(Debug, Default)]
-struct OctreeNode {
-    bounding_volume: BoundingVolume,
-    tile_coords: (u32, u32, u32, u32), // (level, x, y, z)
-    children: Option<[Box<OctreeNode>; 8]>,
+pub struct OctreeNode {
+    pub bounding_volume: BoundingVolume,
+    pub tile_coords: (u32, u32, u32, u32), // (level, x, y, z)
+    pub children: Option<[Box<OctreeNode>; 8]>,
 }
 
 impl OctreeNode {
     // オクツリーを構築する関数
-    fn build(bounding_box: BoundingVolume, tile_coords: (u32, u32, u32, u32), depth: u32) -> Self {
+    pub fn build(
+        bounding_box: BoundingVolume,
+        tile_coords: (u32, u32, u32, u32),
+        depth: u32,
+    ) -> Self {
         if depth == 0 {
             // 再帰の終了条件：指定された深さに達したら子ノードはなし
             return OctreeNode {
@@ -103,22 +107,6 @@ impl fmt::Display for OctreeNode {
         }
         Ok(())
     }
-}
-
-fn main() {
-    // 最小値と最大値を計算してバウンディングボックスを作成
-    let bounding_box = BoundingVolume {
-        min: [0.0, 0.0, 0.0],
-        max: [1.0, 1.0, 1.0],
-    };
-
-    // 分割回数を指定してオクツリーを構築
-    let subdivision_count = 2;
-    let octree = OctreeNode::build(bounding_box.clone(), (0, 0, 0, 0), subdivision_count);
-
-    // オクツリーの構築が完了
-    println!("{}", octree);
-    println!("Octree constructed with depth {}", subdivision_count);
 }
 
 // テストモジュール

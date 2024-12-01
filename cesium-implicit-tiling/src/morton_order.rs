@@ -1,4 +1,4 @@
-fn interleave_bits(x: u32, y: u32, z: u32) -> u64 {
+pub fn interleave_bits(x: u32, y: u32, z: u32) -> u64 {
     fn part1by2(mut n: u64) -> u64 {
         n &= 0x1fffff;
         n = (n | n << 32) & 0x1f00000000ffff;
@@ -16,7 +16,7 @@ fn interleave_bits(x: u32, y: u32, z: u32) -> u64 {
     mx | (my << 1) | (mz << 2)
 }
 
-fn deinterleave_bits(morton_code: u64) -> (u32, u32, u32) {
+pub fn deinterleave_bits(morton_code: u64) -> (u32, u32, u32) {
     fn compact1by2(mut n: u64) -> u32 {
         n &= 0x1249249249249249;
         n = (n ^ (n >> 2)) & 0x10c30c30c30c30c3;
@@ -32,18 +32,4 @@ fn deinterleave_bits(morton_code: u64) -> (u32, u32, u32) {
     let z = compact1by2(morton_code >> 2);
 
     (x, y, z)
-}
-
-fn main() {
-    let x: u32 = 5;
-    let y: u32 = 3;
-    let z: u32 = 7;
-
-    let morton_code = interleave_bits(x, y, z);
-    println!("Morton code: {}", morton_code);
-
-    let (dx, dy, dz) = deinterleave_bits(morton_code);
-    println!("Decoded: x = {}, y = {}, z = {}", dx, dy, dz);
-
-    assert_eq!((x, y, z), (dx, dy, dz));
 }

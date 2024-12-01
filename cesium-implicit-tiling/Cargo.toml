@@ -1,5 +1,5 @@
 [package]
-name = "morton-order"
+name = "cesium-implicit-tiling"
 edition = "2021"
 version.workspace = true
 authors.workspace = true
