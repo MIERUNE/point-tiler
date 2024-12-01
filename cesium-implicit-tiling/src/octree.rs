@@ -7,6 +7,13 @@ pub struct TileCoord {
 }
 
 impl TileCoord {
+    pub fn new(tile_coord: [u32; 4]) -> TileCoord {
+        TileCoord {
+            level: tile_coord[0],
+            xyz: [tile_coord[1], tile_coord[2], tile_coord[3]],
+        }
+    }
+
     pub fn interleave_bits(&self) -> u64 {
         fn part1by2(mut n: u64) -> u64 {
             n &= 0x1fffff;
@@ -157,6 +164,25 @@ impl fmt::Display for OctreeNode {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn test_morton_order_conversion() {
+        let level: u32 = 0;
+        let x: u32 = 0b001;
+        let y: u32 = 0b010;
+        let z: u32 = 0b100;
+
+        let tile_coord = TileCoord::new([level, x, y, z]);
+        let morton_code = tile_coord.interleave_bits();
+        println!("x: {}, y: {}, z: {}, morton_code: {}", x, y, z, morton_code);
+        assert_eq!(0b100010001, morton_code);
+
+        let (dx, dy, dz) = TileCoord::deinterleave_bits(morton_code);
+        println!("Decoded: x = {}, y = {}, z = {}", dx, dy, dz);
+        assert_eq!(x, dx);
+        assert_eq!(y, dy);
+        assert_eq!(z, dz);
+    }
 
     #[test]
     fn test_octree_construction() {

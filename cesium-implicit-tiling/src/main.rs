@@ -1,4 +1,4 @@
-use cesium_implicit_tiling::octree::{BoundingVolume, OctreeNode};
+use cesium_implicit_tiling::octree::{BoundingVolume, OctreeNode, TileCoord};
 
 fn main() {
     let bounding_box = BoundingVolume {
