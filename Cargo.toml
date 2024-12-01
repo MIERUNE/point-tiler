@@ -4,6 +4,8 @@ members = [
     "pcd-*",
     "cesiumtiles-gltf",
     "projection-transform",
+    "morton-order",
+    "subdivide",
 ]
 resolver = "2"
 
