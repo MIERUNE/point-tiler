@@ -1,5 +1,51 @@
 use std::fmt;
 
+#[derive(Debug, Default)]
+pub struct TileCoord {
+    pub level: u32,
+    pub xyz: [u32; 3],
+}
+
+impl TileCoord {
+    pub fn interleave_bits(&self) -> u64 {
+        fn part1by2(mut n: u64) -> u64 {
+            n &= 0x1fffff;
+            n = (n | n << 32) & 0x1f00000000ffff;
+            n = (n | n << 16) & 0x1f0000ff0000ff;
+            n = (n | n << 8) & 0x100f00f00f00f00f;
+            n = (n | n << 4) & 0x10c30c30c30c30c3;
+            n = (n | n << 2) & 0x1249249249249249;
+            n
+        }
+
+        let [x, y, z] = &self.xyz;
+
+        let mx = part1by2(*x as u64);
+        let my = part1by2(*y as u64);
+        let mz = part1by2(*z as u64);
+
+        mx | (my << 1) | (mz << 2)
+    }
+
+    pub fn deinterleave_bits(morton_code: u64) -> (u32, u32, u32) {
+        fn compact1by2(mut n: u64) -> u32 {
+            n &= 0x1249249249249249;
+            n = (n ^ (n >> 2)) & 0x10c30c30c30c30c3;
+            n = (n ^ (n >> 4)) & 0x100f00f00f00f00f;
+            n = (n ^ (n >> 8)) & 0x1f0000ff0000ff;
+            n = (n ^ (n >> 16)) & 0x1f00000000ffff;
+            n = (n ^ (n >> 32)) & 0x1fffff;
+            n as u32
+        }
+
+        let x = compact1by2(morton_code);
+        let y = compact1by2(morton_code >> 1);
+        let z = compact1by2(morton_code >> 2);
+
+        (x, y, z)
+    }
+}
+
 // 境界ボリュームを表す構造体（軸に揃ったバウンディングボックス）
 #[derive(Clone, Debug, Default, PartialEq)]
 pub struct BoundingVolume {
@@ -11,7 +57,7 @@ pub struct BoundingVolume {
 #[derive(Debug, Default)]
 pub struct OctreeNode {
     pub bounding_volume: BoundingVolume,
-    pub tile_coords: (u32, u32, u32, u32), // (level, x, y, z)
+    pub tile_coord: TileCoord,
     pub children: Option<[Box<OctreeNode>; 8]>,
 }
 
@@ -24,9 +70,13 @@ impl OctreeNode {
     ) -> Self {
         if depth == 0 {
             // 再帰の終了条件：指定された深さに達したら子ノードはなし
+            let tile_coords_object = TileCoord {
+                level: tile_coords.0,
+                xyz: [tile_coords.1, tile_coords.2, tile_coords.3],
+            };
             return OctreeNode {
                 bounding_volume: bounding_box,
-                tile_coords,
+                tile_coord: tile_coords_object,
                 children: None,
             };
         }
@@ -83,9 +133,14 @@ impl OctreeNode {
             ));
         }
 
+        let tile_coords_object = TileCoord {
+            level: tile_coords.0,
+            xyz: [tile_coords.1, tile_coords.2, tile_coords.3],
+        };
+
         OctreeNode {
             bounding_volume: bounding_box,
-            tile_coords,
+            tile_coord: tile_coords_object,
             children: Some(children),
         }
     }
@@ -94,7 +149,8 @@ impl OctreeNode {
 // デバッグ用にタイル座標を表示するための実装
 impl fmt::Display for OctreeNode {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        let (level, x, y, z) = self.tile_coords;
+        let level = self.tile_coord.level;
+        let [x, y, z] = self.tile_coord.xyz;
         writeln!(
             f,
             "Level: {}, x: {}, y: {}, z: {}, Bounding Volume: {:?}",
@@ -109,7 +165,6 @@ impl fmt::Display for OctreeNode {
     }
 }
 
-// テストモジュール
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -127,7 +182,10 @@ mod tests {
         let octree = OctreeNode::build(bounding_box.clone(), (0, 0, 0, 0), subdivision_count);
 
         // ルートノードの検証
-        assert_eq!(octree.tile_coords, (0, 0, 0, 0));
+        let root_coord_level = 0;
+        let root_coord_xyz = [0, 0, 0];
+        assert_eq!(octree.tile_coord.level, root_coord_level);
+        assert_eq!(octree.tile_coord.xyz, root_coord_xyz);
         assert_eq!(octree.bounding_volume, bounding_box);
         assert!(octree.children.is_some());
 
@@ -138,7 +196,10 @@ mod tests {
 
             // 最初の子ノードを検証
             let first_child = &children[0];
-            assert_eq!(first_child.tile_coords, (1, 0, 0, 0));
+            let first_child_coord_level = 1;
+            let first_child_coord_xyz = [0, 0, 0];
+            assert_eq!(first_child.tile_coord.level, first_child_coord_level);
+            assert_eq!(first_child.tile_coord.xyz, first_child_coord_xyz);
             assert_eq!(
                 first_child.bounding_volume,
                 BoundingVolume {
@@ -151,7 +212,7 @@ mod tests {
             // 葉ノードの検証（深さが2なので、子ノードの子ノードは葉ノード）
             if let Some(grand_children) = &first_child.children {
                 for grand_child in grand_children.iter() {
-                    assert_eq!(grand_child.tile_coords.0, 2);
+                    assert_eq!(grand_child.tile_coord.level, 2);
                     assert!(grand_child.children.is_none());
                 }
             }

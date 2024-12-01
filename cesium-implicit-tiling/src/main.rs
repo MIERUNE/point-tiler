@@ -1,6 +1,6 @@
 use cesium_implicit_tiling::{
     morton_order::{deinterleave_bits, interleave_bits},
-    subdivide::{BoundingVolume, OctreeNode},
+    octree::{BoundingVolume, OctreeNode},
 };
 
 fn main() {
