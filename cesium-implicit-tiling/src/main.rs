@@ -1,7 +1,6 @@
 use cesium_implicit_tiling::octree::{BoundingVolume, OctreeNode};
 
 fn main() {
-    // subdivide
     let bounding_box = BoundingVolume {
         min: [0.0, 0.0, 0.0],
         max: [1.0, 1.0, 1.0],
