@@ -156,6 +156,10 @@ dependencies = [
 ]
 
 [[package]]
+name = "cesium-implicit-tiling"
+version = "0.0.1"
+
+[[package]]
 name = "cesiumtiles"
 version = "0.0.0"
 source = "git+https://github.com/MIERUNE/cesiumtiles-rs.git#5ec9c251a5f56fd35767fb9f00ba3ff7a4f1741e"
