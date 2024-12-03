@@ -7,6 +7,7 @@ use std::{
 
 use chrono::Local;
 use env_logger::Builder;
+use glob::glob;
 use log::LevelFilter;
 
 use pcd_core::pointcloud::{
@@ -72,6 +73,23 @@ fn check_and_get_extension(paths: &[PathBuf]) -> Result<Extension, String> {
     Ok(get_extension(extensions[0]))
 }
 
+fn expand_globs(input_patterns: Vec<String>) -> Vec<PathBuf> {
+    let mut paths = Vec::new();
+    for pattern in input_patterns {
+        if pattern.contains('*') || pattern.contains('?') || pattern.contains('[') {
+            for entry in glob(&pattern).expect("Failed to read glob pattern") {
+                match entry {
+                    Ok(path) => paths.push(path),
+                    Err(e) => eprintln!("Error: {:?}", e),
+                }
+            }
+        } else {
+            paths.push(PathBuf::from(pattern));
+        }
+    }
+    paths
+}
+
 fn main() {
     Builder::new()
         .format(|buf, record| {
@@ -97,7 +115,10 @@ fn main() {
     let start = std::time::Instant::now();
 
     log::info!("start processing...");
-    let input_files = args.input.iter().map(PathBuf::from).collect::<Vec<_>>();
+    // let input_files = args.input.iter().map(PathBuf::from).collect::<Vec<_>>();
+    let input_files = expand_globs(args.input);
+    log::info!("Expanded input files: {:?}", input_files);
+
     let output_path = PathBuf::from(args.output);
     std::fs::create_dir_all(&output_path).unwrap();
 
