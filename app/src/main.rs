@@ -395,6 +395,7 @@ fn main() {
 
     // The parent tile coordinates are calculated from the file with the maximum zoom level
     for z in (min_zoom..max_zoom).rev() {
+        log::info!("aggregating zoom level: {}", z);
         aggregate_zoom_level(tmp_dir_path.path(), z).unwrap();
     }
     log::info!("Finish zoom aggregation in {:?}", start_local.elapsed());
