@@ -5,3 +5,4 @@ edition = "2021"
 
 [dependencies]
 projection-transform = { path = "../projection-transform" }
+serde = "1.0.215"

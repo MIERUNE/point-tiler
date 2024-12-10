@@ -1,8 +1,9 @@
 use std::collections::HashMap;
 
 use projection_transform::crs::EpsgCode;
+use serde::{Deserialize, Serialize};
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct PointAttributes {
     pub intensity: Option<u16>,
     pub return_number: Option<u8>,
@@ -14,7 +15,7 @@ pub struct PointAttributes {
     pub gps_time: Option<f64>,
 }
 
-#[derive(Debug, Clone, Default)]
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct Color {
     pub r: u16,
     pub g: u16,
@@ -24,7 +25,7 @@ pub struct Color {
 // LAS data coordinates are expressed in u32 format
 // The actual coordinates are calculated based on a combination of scale and offset, as follows
 // x = (x * scale[0]) + offset[0]
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Point {
     pub x: f64,
     pub y: f64,
