@@ -64,11 +64,12 @@ For example, the following data is valid.
 
 ## Functions to be implemented
 
-- [ ] Tiling with Octree
-- [ ] Parallelize intermediate processes
-- [ ] Generate gzip compressed tiles
-- [ ] Assign attributes using EXT_mesh_features
-- [ ] Compress using meshopt
+- [ ] tiling using octree
+- [ ] large-scale processing using streaming
+- [ ] generation of gzip-compressed tiles
+- [ ] assignment of attributes using EXT_mesh_features
+- [ ] compression using meshopt
+- [ ] increasing the number of supported coordinate systems
 
 ## License
 
