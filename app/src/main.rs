@@ -1,3 +1,4 @@
+use std::collections::HashMap;
 use std::ffi::OsStr;
 use std::io::Write;
 use std::{
@@ -14,6 +15,7 @@ use pcd_core::pointcloud::{
     decimation::decimator::{PointCloudDecimator, VoxelDecimator},
     point::{Point, PointCloud},
 };
+use pcd_exporter::tiling;
 use pcd_exporter::{
     cesiumtiles::{make_tile_content, pointcloud_to_tiles},
     gltf::generate_quantized_glb,
@@ -160,6 +162,7 @@ fn main() {
             provider.get_parser()
         }
     };
+    // TODO: Allow each chunk to be retrieved
     let point_cloud = match parser.parse() {
         Ok(point_cloud) => point_cloud,
         Err(e) => {
@@ -181,9 +184,48 @@ fn main() {
 
     let min_zoom = args.min;
     let max_zoom = args.max;
+
     log::info!("start tiling...");
     let start_local = std::time::Instant::now();
-    let tiled_pointcloud = pointcloud_to_tiles(&transformed, min_zoom, max_zoom);
+    let epsg = &transformed.metadata.epsg;
+    let mut tile_point_clouds: HashMap<(u8, u32, u32), Vec<Point>> = HashMap::new();
+
+    for point in &transformed.points {
+        let tile_coords = tiling::scheme::zxy_from_lng_lat(max_zoom, point.x, point.y);
+        tile_point_clouds
+            .entry(tile_coords)
+            .or_default()
+            .push(point.clone());
+    }
+
+    for z in (min_zoom..max_zoom).rev() {
+        let mut parent_tiles: HashMap<(u8, u32, u32), Vec<Point>> = HashMap::new();
+
+        for (&(child_z, child_x, child_y), points) in &tile_point_clouds {
+            if child_z == z + 1 {
+                let parent_x = child_x / 2;
+                let parent_y = child_y / 2;
+                let parent_coords = (z, parent_x, parent_y);
+
+                parent_tiles
+                    .entry(parent_coords)
+                    .or_default()
+                    .extend(points.iter().cloned());
+            }
+        }
+
+        for (coords, pts) in parent_tiles {
+            tile_point_clouds.entry(coords).or_default().extend(pts);
+        }
+    }
+
+    let mut tiled_pointcloud = Vec::new();
+    for ((z, x, y), points) in tile_point_clouds {
+        if z >= min_zoom && z <= max_zoom {
+            let tile_pointcloud = PointCloud::new(points, *epsg);
+            tiled_pointcloud.push(((z, x, y), tile_pointcloud));
+        }
+    }
     log::info!("Finish tiling in {:?}", start_local.elapsed());
 
     log::info!("start exporting tiles...");
