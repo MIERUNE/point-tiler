@@ -1,7 +1,6 @@
 use std::collections::HashMap;
 
 use pcd_core::pointcloud::point::{Point, PointCloud};
-use rayon::iter::{IntoParallelRefIterator as _, ParallelIterator as _};
 use tinymvt::TileZXY;
 
 use crate::tiling::{self, TileContent};

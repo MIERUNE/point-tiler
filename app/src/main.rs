@@ -1,7 +1,7 @@
 use std::collections::HashMap;
 use std::ffi::OsStr;
-use std::fs::{File, OpenOptions};
-use std::io::{BufRead as _, BufReader, BufWriter, Write};
+use std::fs::File;
+use std::io::{BufWriter, Write};
 use std::{
     fs,
     path::{Path, PathBuf},
@@ -103,32 +103,18 @@ fn write_points_to_tile(
 
     fs::create_dir_all(tile_path.parent().unwrap())?;
 
-    let file = OpenOptions::new()
-        .create(true)
-        .append(true)
-        .open(&tile_path)?;
-
+    let file = File::create(tile_path)?;
     let mut writer = BufWriter::new(file);
 
-    for p in points {
-        let line = serde_json::to_string(p).unwrap();
-        writeln!(writer, "{}", line)?;
-    }
+    let encoded = bitcode::encode(points);
+    writer.write_all(&encoded)?;
 
     Ok(())
 }
 
 fn read_points_from_tile(file_path: &Path) -> std::io::Result<Vec<Point>> {
-    let file = File::open(file_path)?;
-    let reader = BufReader::new(file);
-
-    let mut points = Vec::new();
-    for line in reader.lines() {
-        let line = line?;
-        let p: Point = serde_json::from_str(&line).unwrap();
-        points.push(p);
-    }
-
+    let buf = std::fs::read(file_path)?;
+    let points = bitcode::decode(&buf).unwrap();
     Ok(points)
 }
 
@@ -176,28 +162,24 @@ fn aggregate_zoom_level(base_path: &Path, z: u8) -> std::io::Result<()> {
     let child_z = z + 1;
     let child_files = get_tile_list_for_zoom(base_path, child_z);
 
+    let mut parent_map: HashMap<(u8, u32, u32), Vec<Point>> = HashMap::new();
+
     for child_file in child_files {
         let (cz, cx, cy) = extract_tile_coords(&child_file);
         assert_eq!(cz, child_z);
 
-        let file = File::open(&child_file)?;
-        let reader = BufReader::new(file);
+        let points = read_points_from_tile(&child_file)?;
 
-        let mut parent_map: HashMap<(u8, u32, u32), Vec<Point>> = HashMap::new();
-
-        for line in reader.lines() {
-            let line = line?;
-            let p: Point = serde_json::from_str(&line).unwrap();
-
+        for p in points {
             let parent_x = cx / 2;
             let parent_y = cy / 2;
             let parent_coords = (z, parent_x, parent_y);
             parent_map.entry(parent_coords).or_default().push(p);
         }
+    }
 
-        for (parent_tile, pts) in parent_map {
-            write_points_to_tile(base_path, parent_tile, &pts)?;
-        }
+    for (parent_tile, pts) in parent_map {
+        write_points_to_tile(base_path, parent_tile, &pts)?;
     }
 
     Ok(())
@@ -353,39 +335,30 @@ fn main() {
     let min_zoom = args.min;
     let max_zoom = args.max;
 
-    let chunk_size = 1_000_000;
-    let mut start_idx = 0;
-    let total_points = transformed.points.len();
     let tmp_dir_path = tempdir().unwrap();
 
     log::info!("start tiling at max_zoom ({})...", max_zoom);
     let start_local = std::time::Instant::now();
 
     // calc tile coords for max_zoom
-    while start_idx < total_points {
-        let end_idx = (start_idx + chunk_size).min(total_points);
-        let chunk = &transformed.points[start_idx..end_idx];
-        start_idx = end_idx;
+    let tile_pairs: Vec<((u8, u32, u32), Point)> = transformed
+        .points
+        .par_iter()
+        .map(|p| {
+            let tile_coords = tiling::scheme::zxy_from_lng_lat(max_zoom, p.x, p.y);
+            (tile_coords, p.clone())
+        })
+        .collect();
 
-        // calc tile coords
-        let tile_pairs: Vec<((u8, u32, u32), Point)> = chunk
-            .par_iter()
-            .map(|p| {
-                let tile_coords = tiling::scheme::zxy_from_lng_lat(max_zoom, p.x, p.y);
-                (tile_coords, p.clone())
-            })
-            .collect();
+    // grouping by tile
+    let mut tile_map: HashMap<(u8, u32, u32), Vec<Point>> = HashMap::new();
+    for (tile, pt) in tile_pairs {
+        tile_map.entry(tile).or_default().push(pt);
+    }
 
-        // grouping by tile
-        let mut tile_map: HashMap<(u8, u32, u32), Vec<Point>> = HashMap::new();
-        for (tile, pt) in tile_pairs {
-            tile_map.entry(tile).or_default().push(pt);
-        }
-
-        // export to tile files
-        for (tile, pts) in tile_map {
-            write_points_to_tile(tmp_dir_path.path(), tile, &pts).unwrap();
-        }
+    // export to tile files
+    for (tile, pts) in tile_map {
+        write_points_to_tile(tmp_dir_path.path(), tile, &pts).unwrap();
     }
 
     log::info!("Finish tiling at max_zoom in {:?}", start_local.elapsed());
