@@ -25,9 +25,9 @@ use pcd_exporter::{
     gltf::generate_quantized_glb,
     tiling::{geometric_error, TileContent, TileTree},
 };
-use pcd_parser::parsers::csv::CsvParserProvider;
-use pcd_parser::parsers::{get_extension, Extension};
-use pcd_parser::parsers::{las::LasParserProvider, ParserProvider as _};
+use pcd_parser::parser::csv::CsvParserProvider;
+use pcd_parser::parser::{get_extension, Extension};
+use pcd_parser::parser::{las::LasParserProvider, ParserProvider as _};
 use pcd_transformer::{
     builder::PointCloudTransformBuilder, runner::PointCloudTransformer, Transformer,
 };
