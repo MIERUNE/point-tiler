@@ -18,8 +18,9 @@ use env_logger::Builder;
 use glob::glob;
 use itertools::Itertools as _;
 use log::LevelFilter;
+use pcd_parser::reader::csv::CsvPointReader;
 use pcd_parser::reader::las::LasPointReader;
-use pcd_parser::reader::PointReader as _;
+use pcd_parser::reader::PointReader;
 use pcd_transformer::projection::transform_point;
 use projection_transform::vshift::Jgd2011ToWgs84;
 use rayon::iter::{IntoParallelRefIterator as _, ParallelIterator as _};
@@ -364,60 +365,24 @@ fn main() {
     );
     let start_local = std::time::Instant::now();
 
-    // TODO: CSV handling
-    let extension = check_and_get_extension(&input_files).unwrap();
-    // let parser = match extension {
-    //     Extension::Las => {
-    //         let las_parser_provider = LasParserProvider {
-    //             filenames: input_files,
-    //             epsg: args.epsg,
-    //         };
-    //         let provider = las_parser_provider;
-    //         provider.get_parser()
-    //     }
-    //     Extension::Laz => {
-    //         let las_parser_provider = LasParserProvider {
-    //             filenames: input_files,
-    //             epsg: args.epsg,
-    //         };
-    //         let provider = las_parser_provider;
-    //         provider.get_parser()
-    //     }
-    //     Extension::Csv => {
-    //         let csv_parser_provider = CsvParserProvider {
-    //             filenames: input_files,
-    //             epsg: args.epsg,
-    //         };
-    //         let provider = csv_parser_provider;
-    //         provider.get_parser()
-    //     }
-    //     Extension::Txt => {
-    //         let csv_parser_provider = CsvParserProvider {
-    //             filenames: input_files,
-    //             epsg: args.epsg,
-    //         };
-    //         let provider = csv_parser_provider;
-    //         provider.get_parser()
-    //     }
-    // };
-    // // TODO: Allow each chunk to be retrieved
-    // let point_cloud = match parser.parse() {
-    //     Ok(point_cloud) => point_cloud,
-    //     Err(e) => {
-    //         log::error!("Failed to parse point cloud: {:?}", e);
-    //         return;
-    //     }
-    // };
-
     let jgd2wgs = Arc::new(Jgd2011ToWgs84::default());
 
+    // Number of points processed at once
     let chunk_size = 10_000_000;
 
     let (tx, rx) = mpsc::channel::<Vec<Point>>();
     let handle = thread::spawn(move || {
-        let mut las_reader = LasPointReader::new(input_files).unwrap();
         let mut buffer = Vec::with_capacity(chunk_size);
-        while let Ok(Some(p)) = las_reader.next_point() {
+
+        let extension = check_and_get_extension(&input_files).unwrap();
+        let mut reader: Box<dyn PointReader> = match extension {
+            Extension::Las => Box::new(LasPointReader::new(input_files).unwrap()),
+            Extension::Laz => Box::new(LasPointReader::new(input_files).unwrap()),
+            Extension::Csv => Box::new(CsvPointReader::new(input_files).unwrap()),
+            Extension::Txt => Box::new(CsvPointReader::new(input_files).unwrap()),
+        };
+
+        while let Ok(Some(p)) = reader.next_point() {
             buffer.push(p);
             if buffer.len() >= chunk_size {
                 if tx.send(buffer.clone()).is_err() {

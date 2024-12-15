@@ -2,14 +2,13 @@ use std::{collections::HashMap, error::Error, fs::File, io, path::PathBuf};
 
 use csv::ReaderBuilder;
 use pcd_core::pointcloud::point::{Color, Point, PointAttributes};
-use projection_transform::crs::EpsgCode;
 
 use super::PointReader;
 
 fn create_field_mapping(
     headers: &csv::StringRecord,
     has_headers: bool,
-) -> Result<HashMap<String, usize>, Box<dyn Error>> {
+) -> Result<HashMap<String, usize>, Box<dyn Error + Send + Sync>> {
     let mut mapping = HashMap::new();
 
     let attribute_names = vec![
@@ -34,10 +33,10 @@ fn create_field_mapping(
 
     if has_headers {
         for (index, header) in headers.iter().enumerate() {
-            let normalized_header = header.to_lowercase().replace('_', "").replace('-', "");
+            let normalized_header = header.to_lowercase().replace(['_', '-'], "");
 
             for attr_name in &attribute_names {
-                let normalized_attr = attr_name.to_lowercase().replace('_', "").replace('-', "");
+                let normalized_attr = attr_name.to_lowercase().replace(['_', '-'], "");
                 if normalized_header == normalized_attr {
                     mapping.insert(attr_name.to_string(), index);
                     break;
@@ -92,22 +91,20 @@ fn parse_optional_field(
     }
 }
 
-pub struct CsvReader {
-    files: Vec<PathBuf>,
-    current_file_index: usize,
-    current_reader: Option<csv::Reader<File>>,
-    field_mapping: HashMap<String, usize>,
-    epsg: EpsgCode,
+pub struct CsvPointReader {
+    pub files: Vec<PathBuf>,
+    pub current_file_index: usize,
+    pub current_reader: Option<csv::Reader<File>>,
+    pub field_mapping: HashMap<String, usize>,
 }
 
-impl CsvReader {
-    pub fn new(files: Vec<PathBuf>, epsg: EpsgCode) -> io::Result<Self> {
-        let mut reader = CsvReader {
+impl CsvPointReader {
+    pub fn new(files: Vec<PathBuf>) -> io::Result<Self> {
+        let mut reader = CsvPointReader {
             files,
             current_file_index: 0,
             current_reader: None,
             field_mapping: HashMap::new(),
-            epsg,
         };
 
         reader.open_next_file()?;
@@ -137,31 +134,28 @@ impl CsvReader {
     }
 
     fn parse_point(&self, record: &csv::StringRecord) -> Result<Point, Box<dyn Error>> {
-        let x_str =
-            get_field_value(&record, &self.field_mapping, "x").ok_or("Missing 'x' field")?;
-        let y_str =
-            get_field_value(&record, &self.field_mapping, "y").ok_or("Missing 'y' field")?;
-        let z_str =
-            get_field_value(&record, &self.field_mapping, "z").ok_or("Missing 'z' field")?;
+        let x_str = get_field_value(record, &self.field_mapping, "x").ok_or("Missing 'x' field")?;
+        let y_str = get_field_value(record, &self.field_mapping, "y").ok_or("Missing 'y' field")?;
+        let z_str = get_field_value(record, &self.field_mapping, "z").ok_or("Missing 'z' field")?;
 
         let x: f64 = x_str.parse()?;
         let y: f64 = y_str.parse()?;
         let z: f64 = z_str.parse()?;
 
-        let r = parse_optional_field(&record, &self.field_mapping, "r")
-            .or_else(|| parse_optional_field(&record, &self.field_mapping, "red"))
+        let r = parse_optional_field(record, &self.field_mapping, "r")
+            .or_else(|| parse_optional_field(record, &self.field_mapping, "red"))
             .unwrap_or("65535".to_string())
             .parse::<f64>()?
             .floor() as u16;
 
-        let g = parse_optional_field(&record, &self.field_mapping, "g")
-            .or_else(|| parse_optional_field(&record, &self.field_mapping, "green"))
+        let g = parse_optional_field(record, &self.field_mapping, "g")
+            .or_else(|| parse_optional_field(record, &self.field_mapping, "green"))
             .unwrap_or("65535".to_string())
             .parse::<f64>()?
             .floor() as u16;
 
-        let b = parse_optional_field(&record, &self.field_mapping, "b")
-            .or_else(|| parse_optional_field(&record, &self.field_mapping, "blue"))
+        let b = parse_optional_field(record, &self.field_mapping, "b")
+            .or_else(|| parse_optional_field(record, &self.field_mapping, "blue"))
             .unwrap_or("65535".to_string())
             .parse::<f64>()?
             .floor() as u16;
@@ -216,7 +210,7 @@ impl CsvReader {
     }
 }
 
-impl PointReader for CsvReader {
+impl PointReader for CsvPointReader {
     fn next_point(&mut self) -> io::Result<Option<Point>> {
         loop {
             if self.current_reader.is_none() {
@@ -234,7 +228,7 @@ impl PointReader for CsvReader {
                     Ok(p) => return Ok(Some(p)),
                     Err(e) => {
                         eprintln!("Error parsing CSV point: {}", e);
-                        return Err(io::Error::new(io::ErrorKind::Other, e));
+                        return Err(io::Error::new(io::ErrorKind::Other, format!("{}", e)));
                     }
                 },
                 Ok(false) => {
