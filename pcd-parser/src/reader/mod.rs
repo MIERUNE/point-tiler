@@ -1,3 +1,4 @@
+pub mod csv;
 pub mod las;
 
 use pcd_core::pointcloud::point::Point;
