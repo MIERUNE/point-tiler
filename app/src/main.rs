@@ -360,7 +360,13 @@ fn main() {
 
     let tmp_dir_path = tempdir().unwrap();
 
-    log::info!("start parsing...");
+    let min_zoom = args.min;
+    let max_zoom = args.max;
+
+    log::info!(
+        "start parse and transform and tiling at max_zoom ({})...",
+        max_zoom
+    );
     let start_local = std::time::Instant::now();
 
     // TODO: CSV handling
@@ -430,16 +436,7 @@ fn main() {
             buffer.clear();
         }
     });
-    log::info!("finish parsing in {:?}", start_local.elapsed());
 
-    let min_zoom = args.min;
-    let max_zoom = args.max;
-
-    log::info!(
-        "start transforming and tiling at max_zoom ({})...",
-        max_zoom
-    );
-    let start_local = std::time::Instant::now();
     for (current_run_index, chunk) in rx.into_iter().enumerate() {
         let mut keyed_points: Vec<(SortKey, Point)> = chunk
             .into_iter()
@@ -466,13 +463,16 @@ fn main() {
         let encoded = bitcode::encode(&keyed_points);
         writer.write_all(&encoded).unwrap();
     }
+
+    handle.join().expect("Reading thread panicked");
+
     log::info!(
         "Finish transforming and tiling in {:?}",
         start_local.elapsed()
     );
 
-    handle.join().expect("Reading thread panicked");
-
+    log::info!("start sorting...");
+    let start_local = std::time::Instant::now();
     let pattern = tmp_dir_path.path().join("run_*.bin");
     let run_files = glob::glob(pattern.to_str().unwrap())
         .unwrap()
@@ -516,6 +516,7 @@ fn main() {
         let encoded = bitcode::encode(&points);
         writer.write_all(&encoded).unwrap();
     }
+    log::info!("Finish sorting in {:?}", start_local.elapsed());
 
     log::info!("start zoom aggregation...");
     let start_local = std::time::Instant::now();
