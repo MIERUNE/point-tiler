@@ -99,6 +99,7 @@ name = "app"
 version = "0.0.1"
 dependencies = [
  "bitcode",
+ "bytemuck",
  "cesiumtiles",
  "cesiumtiles-gltf",
  "cesiumtiles-gltf-json",
@@ -106,6 +107,8 @@ dependencies = [
  "clap",
  "env_logger",
  "glob",
+ "itertools",
+ "kv-extsort",
  "log",
  "pcd-core",
  "pcd-exporter",
@@ -117,6 +120,7 @@ dependencies = [
  "serde_json",
  "tempfile",
  "thiserror",
+ "tinymvt",
 ]
 
 [[package]]
@@ -172,6 +176,20 @@ name = "bytemuck"
 version = "1.20.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "8b37c88a63ffd85d15b406896cc343916d7cf57838a847b3a6f2ca5d39a5695a"
+dependencies = [
+ "bytemuck_derive",
+]
+
+[[package]]
+name = "bytemuck_derive"
+version = "1.8.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "bcfcc3cd946cb52f0bbfdbbcfa2f4e24f75ebb6c0e1002f7c25904fada18b9ec"
+dependencies = [
+ "proc-macro2",
+ "quote",
+ "syn",
+]
 
 [[package]]
 name = "byteorder"
@@ -300,6 +318,15 @@ name = "core-foundation-sys"
 version = "0.8.7"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "773648b94d0e5d620f64f280777445740e61fe701025087ec8b57f45c791888b"
+
+[[package]]
+name = "crossbeam-channel"
+version = "0.5.13"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "33480d6946193aa8033910124896ca395333cae7e2d1113d1fef6c3272217df2"
+dependencies = [
+ "crossbeam-utils",
+]
 
 [[package]]
 name = "crossbeam-deque"
@@ -516,6 +543,19 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "6a88f1bda2bd75b0452a14784937d796722fdebfe50df998aeb3f0b7603019a9"
 dependencies = [
  "wasm-bindgen",
+]
+
+[[package]]
+name = "kv-extsort"
+version = "0.1.0"
+source = "git+https://github.com/MIERUNE/kv-extsort-rs.git#6ac60e183cca6525876b24137cb1b822236e6e0d"
+dependencies = [
+ "bytemuck",
+ "crossbeam-channel",
+ "log",
+ "rayon",
+ "tempfile",
+ "thiserror",
 ]
 
 [[package]]

@@ -2,7 +2,7 @@ use std::path::PathBuf;
 
 use pcd_core::pointcloud::point::{Point, PointCloud};
 use pcd_exporter::gltf::generate_quantized_glb;
-use pcd_parser::parsers::{las::LasParserProvider, ParserProvider as _};
+use pcd_parser::parser::{las::LasParserProvider, ParserProvider as _};
 use pcd_transformer::{
     builder::PointCloudTransformBuilder,
     runner::{PointCloudTransformer, Transformer},
