@@ -1,17 +1,27 @@
 use std::collections::HashMap;
+use std::convert::Infallible;
 use std::ffi::OsStr;
 use std::fs::File;
-use std::io::{BufWriter, Write};
+use std::io::{BufWriter, Read as _, Write};
+use std::sync::{mpsc, Arc};
+use std::thread;
 use std::{
     fs,
     path::{Path, PathBuf},
 };
 
+use bitcode::{Decode, Encode};
+use bytemuck::{Pod, Zeroable};
 use chrono::Local;
 use clap::Parser;
 use env_logger::Builder;
 use glob::glob;
+use itertools::Itertools as _;
 use log::LevelFilter;
+use pcd_parser::reader::las::LasPointReader;
+use pcd_parser::reader::PointReader as _;
+use pcd_transformer::projection::transform_point;
+use projection_transform::vshift::Jgd2011ToWgs84;
 use rayon::iter::{IntoParallelRefIterator as _, ParallelIterator as _};
 use tempfile::tempdir;
 
@@ -32,6 +42,7 @@ use pcd_transformer::{
     builder::PointCloudTransformBuilder, runner::PointCloudTransformer, Transformer,
 };
 use projection_transform::cartesian::geodetic_to_geocentric;
+use tinymvt::tileid::hilbert;
 
 #[derive(Parser, Debug)]
 #[command(
@@ -244,6 +255,78 @@ fn export_tiles_to_glb(
     Ok(tile_contents)
 }
 
+#[derive(Debug, Copy, Clone, Ord, PartialOrd, Eq, PartialEq, Pod, Zeroable, Encode, Decode)]
+#[repr(C)]
+pub struct SortKey {
+    pub tile_id: u64,
+}
+
+#[derive(Clone, Copy, Debug)]
+pub enum TileIdMethod {
+    Hilbert,
+}
+
+impl TileIdMethod {
+    pub fn zxy_to_id(&self, z: u8, x: u32, y: u32) -> u64 {
+        match self {
+            TileIdMethod::Hilbert => hilbert::zxy_to_id(z, x, y),
+        }
+    }
+
+    pub fn id_to_zxy(&self, tile_id: u64) -> (u8, u32, u32) {
+        match self {
+            TileIdMethod::Hilbert => hilbert::id_to_zxy(tile_id),
+        }
+    }
+}
+
+struct RunFileIterator {
+    files: std::vec::IntoIter<PathBuf>,
+    current: Option<std::vec::IntoIter<(SortKey, Point)>>,
+}
+
+impl RunFileIterator {
+    fn new(files: Vec<PathBuf>) -> Self {
+        RunFileIterator {
+            files: files.into_iter(),
+            current: None,
+        }
+    }
+
+    fn read_run_file(path: PathBuf) -> Result<Vec<(SortKey, Point)>, Infallible> {
+        let file = File::open(path).unwrap();
+        let mut buf_reader = std::io::BufReader::new(file);
+        let mut buffer = Vec::new();
+        buf_reader.read_to_end(&mut buffer).unwrap();
+        let data: Vec<(SortKey, Point)> = bitcode::decode(&buffer[..]).unwrap();
+        Ok(data)
+    }
+}
+
+impl Iterator for RunFileIterator {
+    type Item = (SortKey, Point);
+
+    fn next(&mut self) -> Option<Self::Item> {
+        loop {
+            if let Some(ref mut iter) = self.current {
+                if let Some(item) = iter.next() {
+                    return Some(item);
+                }
+            }
+
+            match self.files.next() {
+                Some(file) => {
+                    let data = RunFileIterator::read_run_file(file).unwrap();
+                    self.current = Some(data.into_iter());
+                }
+                None => {
+                    return None;
+                }
+            }
+        }
+    }
+}
+
 fn main() {
     Builder::new()
         .format(|buf, record| {
@@ -275,93 +358,164 @@ fn main() {
     let output_path = PathBuf::from(args.output);
     std::fs::create_dir_all(&output_path).unwrap();
 
+    let tmp_dir_path = tempdir().unwrap();
+
     log::info!("start parsing...");
     let start_local = std::time::Instant::now();
 
+    // TODO: CSV handling
     let extension = check_and_get_extension(&input_files).unwrap();
-    let parser = match extension {
-        Extension::Las => {
-            let las_parser_provider = LasParserProvider {
-                filenames: input_files,
-                epsg: args.epsg,
-            };
-            let provider = las_parser_provider;
-            provider.get_parser()
+    // let parser = match extension {
+    //     Extension::Las => {
+    //         let las_parser_provider = LasParserProvider {
+    //             filenames: input_files,
+    //             epsg: args.epsg,
+    //         };
+    //         let provider = las_parser_provider;
+    //         provider.get_parser()
+    //     }
+    //     Extension::Laz => {
+    //         let las_parser_provider = LasParserProvider {
+    //             filenames: input_files,
+    //             epsg: args.epsg,
+    //         };
+    //         let provider = las_parser_provider;
+    //         provider.get_parser()
+    //     }
+    //     Extension::Csv => {
+    //         let csv_parser_provider = CsvParserProvider {
+    //             filenames: input_files,
+    //             epsg: args.epsg,
+    //         };
+    //         let provider = csv_parser_provider;
+    //         provider.get_parser()
+    //     }
+    //     Extension::Txt => {
+    //         let csv_parser_provider = CsvParserProvider {
+    //             filenames: input_files,
+    //             epsg: args.epsg,
+    //         };
+    //         let provider = csv_parser_provider;
+    //         provider.get_parser()
+    //     }
+    // };
+    // // TODO: Allow each chunk to be retrieved
+    // let point_cloud = match parser.parse() {
+    //     Ok(point_cloud) => point_cloud,
+    //     Err(e) => {
+    //         log::error!("Failed to parse point cloud: {:?}", e);
+    //         return;
+    //     }
+    // };
+
+    let jgd2wgs = Arc::new(Jgd2011ToWgs84::default());
+
+    let chunk_size = 10_000_000;
+
+    let (tx, rx) = mpsc::channel::<Vec<Point>>();
+    let handle = thread::spawn(move || {
+        let mut las_reader = LasPointReader::new(input_files).unwrap();
+        let mut buffer = Vec::with_capacity(chunk_size);
+        while let Ok(Some(p)) = las_reader.next_point() {
+            buffer.push(p);
+            if buffer.len() >= chunk_size {
+                if tx.send(buffer.clone()).is_err() {
+                    break;
+                }
+                buffer = Vec::with_capacity(chunk_size);
+            }
         }
-        Extension::Laz => {
-            let las_parser_provider = LasParserProvider {
-                filenames: input_files,
-                epsg: args.epsg,
-            };
-            let provider = las_parser_provider;
-            provider.get_parser()
+        if !buffer.is_empty() {
+            let _ = tx.send(buffer.clone());
+            buffer.clear();
         }
-        Extension::Csv => {
-            let csv_parser_provider = CsvParserProvider {
-                filenames: input_files,
-                epsg: args.epsg,
-            };
-            let provider = csv_parser_provider;
-            provider.get_parser()
-        }
-        Extension::Txt => {
-            let csv_parser_provider = CsvParserProvider {
-                filenames: input_files,
-                epsg: args.epsg,
-            };
-            let provider = csv_parser_provider;
-            provider.get_parser()
-        }
-    };
-    // TODO: Allow each chunk to be retrieved
-    let point_cloud = match parser.parse() {
-        Ok(point_cloud) => point_cloud,
-        Err(e) => {
-            log::error!("Failed to parse point cloud: {:?}", e);
-            return;
-        }
-    };
+    });
     log::info!("finish parsing in {:?}", start_local.elapsed());
-
-    log::info!("start transforming...");
-    let output_epsg = 4979;
-    let start_local = std::time::Instant::now();
-    let transform_builder = PointCloudTransformBuilder::new(output_epsg);
-    let transformer = PointCloudTransformer::new(Box::new(transform_builder));
-
-    let transformed = transformer.execute(point_cloud.clone());
-    log::info!("Finish transforming in {:?}", start_local.elapsed());
 
     let min_zoom = args.min;
     let max_zoom = args.max;
 
-    let tmp_dir_path = tempdir().unwrap();
-
-    log::info!("start tiling at max_zoom ({})...", max_zoom);
+    log::info!(
+        "start transforming and tiling at max_zoom ({})...",
+        max_zoom
+    );
     let start_local = std::time::Instant::now();
+    for (current_run_index, chunk) in rx.into_iter().enumerate() {
+        let mut keyed_points: Vec<(SortKey, Point)> = chunk
+            .into_iter()
+            .map(|p| {
+                let transformed = transform_point(p, args.epsg, &jgd2wgs);
 
-    // calc tile coords for max_zoom
-    let tile_pairs: Vec<((u8, u32, u32), Point)> = transformed
-        .points
-        .par_iter()
-        .map(|p| {
-            let tile_coords = tiling::scheme::zxy_from_lng_lat(max_zoom, p.x, p.y);
-            (tile_coords, p.clone())
-        })
-        .collect();
+                let tile_coords =
+                    tiling::scheme::zxy_from_lng_lat(max_zoom, transformed.x, transformed.y);
+                let tile_id =
+                    TileIdMethod::Hilbert.zxy_to_id(tile_coords.0, tile_coords.1, tile_coords.2);
 
-    // grouping by tile
-    let mut tile_map: HashMap<(u8, u32, u32), Vec<Point>> = HashMap::new();
-    for (tile, pt) in tile_pairs {
-        tile_map.entry(tile).or_default().push(pt);
+                (SortKey { tile_id }, transformed)
+            })
+            .collect();
+
+        keyed_points.sort_by_key(|(k, _)| k.tile_id);
+
+        let run_file_path = tmp_dir_path
+            .path()
+            .join(format!("run_{}.bin", current_run_index));
+        let file = fs::File::create(run_file_path).unwrap();
+        let mut writer = std::io::BufWriter::new(file);
+
+        let encoded = bitcode::encode(&keyed_points);
+        writer.write_all(&encoded).unwrap();
     }
+    log::info!(
+        "Finish transforming and tiling in {:?}",
+        start_local.elapsed()
+    );
 
-    // export to tile files
-    for (tile, pts) in tile_map {
-        write_points_to_tile(tmp_dir_path.path(), tile, &pts).unwrap();
+    handle.join().expect("Reading thread panicked");
+
+    let pattern = tmp_dir_path.path().join("run_*.bin");
+    let run_files = glob::glob(pattern.to_str().unwrap())
+        .unwrap()
+        .map(|r| r.unwrap())
+        .collect::<Vec<_>>();
+
+    let tile_id_iter = RunFileIterator::new(run_files);
+
+    let config = kv_extsort::SortConfig::default().max_chunk_bytes(1024 * 1024 * 1024);
+    let sorted_iter = kv_extsort::sort(
+        tile_id_iter.map(|(key, point)| {
+            let encoded_point = bitcode::encode(&point);
+            std::result::Result::<_, Infallible>::Ok((key, encoded_point))
+        }),
+        config,
+    );
+
+    let grouped_iter = sorted_iter.chunk_by(|res| match res {
+        Ok((key, _)) => (false, *key),
+        Err(_) => (true, SortKey { tile_id: 0 }),
+    });
+
+    for ((_, key), group) in &grouped_iter {
+        let points = group
+            .into_iter()
+            .map(|r| r.map(|(_, p)| bitcode::decode::<Point>(&p).unwrap()))
+            .collect::<Result<Vec<_>, _>>()
+            .unwrap();
+
+        let tile_id = key.tile_id;
+        let tile = TileIdMethod::Hilbert.id_to_zxy(tile_id);
+
+        let (z, x, y) = tile;
+        let tile_path = tmp_dir_path.path().join(format!("{}/{}/{}.bin", z, x, y));
+
+        fs::create_dir_all(tile_path.parent().unwrap()).unwrap();
+
+        let file = fs::File::create(tile_path).unwrap();
+        let mut writer = BufWriter::new(file);
+
+        let encoded = bitcode::encode(&points);
+        writer.write_all(&encoded).unwrap();
     }
-
-    log::info!("Finish tiling at max_zoom in {:?}", start_local.elapsed());
 
     log::info!("start zoom aggregation...");
     let start_local = std::time::Instant::now();

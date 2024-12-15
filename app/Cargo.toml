@@ -24,3 +24,7 @@ serde_json = "1.0.133"
 glob = "0.3.1"
 tempfile = "3.14.0"
 bitcode = "0.6.3"
+bytemuck = "1.20.0"
+tinymvt = "0.0.1"
+kv-extsort = { git = "https://github.com/MIERUNE/kv-extsort-rs.git" }
+itertools = "0.13.0"

@@ -1,5 +1,6 @@
 use std::{
-    io::{self},
+    fs::File,
+    io::{self, BufReader},
     path::PathBuf,
 };
 
@@ -23,10 +24,11 @@ impl LasPointReader {
         })
     }
 
-    fn open_next_file(&mut self) -> io::Result<()> {
+    pub fn open_next_file(&mut self) -> io::Result<()> {
         if self.current_file_index < self.files.len() {
-            let file = &self.files[self.current_file_index];
-            let reader = las::Reader::from_path(file).unwrap();
+            let path = &self.files[self.current_file_index];
+            let file = File::open(path).unwrap();
+            let reader = Reader::new(BufReader::new(file)).unwrap();
             self.current_reader = Some(reader);
             self.current_file_index += 1;
             Ok(())
@@ -36,7 +38,7 @@ impl LasPointReader {
         }
     }
 
-    fn convert_las_point(las_point: las::Point) -> Point {
+    pub fn convert_las_point(las_point: las::Point) -> Point {
         let color = las_point
             .color
             .map(|c| Color {
@@ -100,8 +102,8 @@ impl PointReader for LasPointReader {
 }
 
 pub struct PointIterator<R: PointReader> {
-    reader: R,
-    chunk_size: usize,
+    pub reader: R,
+    pub chunk_size: usize,
 }
 
 impl<R: PointReader> PointIterator<R> {
