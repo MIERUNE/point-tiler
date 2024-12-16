@@ -28,3 +28,4 @@ bytemuck = "1.20.0"
 tinymvt = "0.0.1"
 kv-extsort = { git = "https://github.com/MIERUNE/kv-extsort-rs.git" }
 itertools = "0.13.0"
+gzp = "0.10.1"
