@@ -456,7 +456,7 @@ fn main() {
 
     let tile_id_iter = RunFileIterator::new(run_files);
 
-    let config = kv_extsort::SortConfig::default().max_chunk_bytes(1024 * 1024 * 1024);
+    let config = kv_extsort::SortConfig::default().max_chunk_bytes(max_memory_mb_bytes);
     let sorted_iter = kv_extsort::sort(
         tile_id_iter.map(|(key, point)| {
             let encoded_point = bitcode::encode(&point);
