@@ -4,7 +4,6 @@ members = [
     "pcd-*",
     "cesiumtiles-gltf",
     "projection-transform",
-    "cesium-implicit-tiling",
 ]
 resolver = "2"
 
