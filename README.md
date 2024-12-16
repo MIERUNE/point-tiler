@@ -32,6 +32,7 @@ After installing Rust, download this repository.
 - `epsg`: Input the epsg code of the las file. All point clouds are recognized as being in the same coordinate system.(Currently, only the Japanese plane rectangular coordinate system is supported.)
 - `min`: Specify the minimum zoom level you want to output.
 - `max`: Specify the maximum zoom level you want to output.
+- `max-memory-mb`: Specify the number of MB of memory available for conversion.
 
 In the repository root, the following commands can be executed.
 
@@ -40,7 +41,8 @@ point_tiler --input app/examples/data/sample.las \
     --output app/examples/data/output \
     --epsg 6677 \
     --min 15 \
-    --max 18
+    --max 18 \
+    --max-memory-mb 8192
 ```
 
 ### CSV/TXT
