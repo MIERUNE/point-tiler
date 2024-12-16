@@ -62,6 +62,9 @@ struct Cli {
 
     #[arg(long, default_value_t = 18)]
     max: u8,
+
+    #[arg(long, default_value_t = 4 * 1024)]
+    max_memory_mb: usize,
 }
 
 fn check_and_get_extension(paths: &[PathBuf]) -> Result<Extension, String> {
@@ -344,6 +347,7 @@ fn main() {
     log::info!("input EPSG: {}", args.epsg);
     log::info!("min zoom: {}", args.min);
     log::info!("max zoom: {}", args.max);
+    log::info!("max memory mb: {}", args.max_memory_mb);
 
     let start = std::time::Instant::now();
 
@@ -367,12 +371,23 @@ fn main() {
 
     let jgd2wgs = Arc::new(Jgd2011ToWgs84::default());
 
-    // Number of points processed at once
-    let chunk_size = 10_000_000;
+    let max_memory_mb: usize = args.max_memory_mb;
+    let max_memory_mb_bytes = max_memory_mb * 1024 * 1024;
+    let point_size = 96;
+    let default_chunk_points_len = 10_000_000;
+    let one_chunk_mem = default_chunk_points_len * point_size;
+    let mut channel_capacity = max_memory_mb_bytes / one_chunk_mem;
+    if channel_capacity == 0 {
+        channel_capacity = 1;
+    }
 
-    let (tx, rx) = mpsc::channel::<Vec<Point>>();
+    log::info!("max_memory_mb_bytes: {}", max_memory_mb_bytes);
+    log::info!("one_chunk_mem: {}", one_chunk_mem);
+    log::info!("channel_capacity: {}", channel_capacity);
+
+    let (tx, rx) = mpsc::sync_channel::<Vec<Point>>(channel_capacity);
     let handle = thread::spawn(move || {
-        let mut buffer = Vec::with_capacity(chunk_size);
+        let mut buffer = Vec::with_capacity(default_chunk_points_len);
 
         let extension = check_and_get_extension(&input_files).unwrap();
         let mut reader: Box<dyn PointReader> = match extension {
@@ -384,15 +399,15 @@ fn main() {
 
         while let Ok(Some(p)) = reader.next_point() {
             buffer.push(p);
-            if buffer.len() >= chunk_size {
+            if buffer.len() >= default_chunk_points_len {
                 if tx.send(buffer.clone()).is_err() {
                     break;
                 }
-                buffer = Vec::with_capacity(chunk_size);
+                buffer = Vec::with_capacity(default_chunk_points_len);
             }
         }
         if !buffer.is_empty() {
-            let _ = tx.send(buffer.clone());
+            tx.send(buffer.clone()).unwrap();
             buffer.clear();
         }
     });
