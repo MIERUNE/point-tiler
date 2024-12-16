@@ -65,7 +65,7 @@ For example, the following data is valid.
 ## Functions to be implemented
 
 - [ ] tiling using octree
-- [ ] large-scale processing using streaming
+- [X] large-scale processing using streaming
 - [ ] generation of gzip-compressed tiles
 - [ ] assignment of attributes using EXT_mesh_features
 - [ ] compression using meshopt
@@ -78,7 +78,6 @@ For example, the following data is valid.
 ## Authors
 
 - Satoru Nishio (@nokonoko1203)
-
 - And all contributors
 
 ## Use of Third-Party Source Code
