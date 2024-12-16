@@ -358,7 +358,7 @@ fn main() {
     let output_path = PathBuf::from(args.output);
     std::fs::create_dir_all(&output_path).unwrap();
 
-    let tmp_dir_path = tempdir().unwrap();
+    let tmp_run_file_dir_path = tempdir().unwrap();
 
     let min_zoom = args.min;
     let max_zoom = args.max;
@@ -429,7 +429,7 @@ fn main() {
 
         keyed_points.sort_by_key(|(k, _)| k.tile_id);
 
-        let run_file_path = tmp_dir_path
+        let run_file_path = tmp_run_file_dir_path
             .path()
             .join(format!("run_{}.bin", current_run_index));
         let file = fs::File::create(run_file_path).unwrap();
@@ -448,7 +448,7 @@ fn main() {
 
     log::info!("start sorting...");
     let start_local = std::time::Instant::now();
-    let pattern = tmp_dir_path.path().join("run_*.bin");
+    let pattern = tmp_run_file_dir_path.path().join("run_*.bin");
     let run_files = glob::glob(pattern.to_str().unwrap())
         .unwrap()
         .map(|r| r.unwrap())
@@ -470,6 +470,8 @@ fn main() {
         Err(_) => (true, SortKey { tile_id: 0 }),
     });
 
+    let tmp_tiled_file_dir_path = tempdir().unwrap();
+
     for ((_, key), group) in &grouped_iter {
         let points = group
             .into_iter()
@@ -481,7 +483,9 @@ fn main() {
         let tile = TileIdMethod::Hilbert.id_to_zxy(tile_id);
 
         let (z, x, y) = tile;
-        let tile_path = tmp_dir_path.path().join(format!("{}/{}/{}.bin", z, x, y));
+        let tile_path = tmp_tiled_file_dir_path
+            .path()
+            .join(format!("{}/{}/{}.bin", z, x, y));
 
         fs::create_dir_all(tile_path.parent().unwrap()).unwrap();
 
@@ -493,21 +497,30 @@ fn main() {
     }
     log::info!("Finish sorting in {:?}", start_local.elapsed());
 
+    drop(tmp_run_file_dir_path);
+
     log::info!("start zoom aggregation...");
     let start_local = std::time::Instant::now();
 
     // The parent tile coordinates are calculated from the file with the maximum zoom level
     for z in (min_zoom..max_zoom).rev() {
         log::info!("aggregating zoom level: {}", z);
-        aggregate_zoom_level(tmp_dir_path.path(), z).unwrap();
+        aggregate_zoom_level(tmp_tiled_file_dir_path.path(), z).unwrap();
     }
     log::info!("Finish zoom aggregation in {:?}", start_local.elapsed());
 
     log::info!("start exporting tiles (GLB)...");
     let start_local = std::time::Instant::now();
-    let tile_contents =
-        export_tiles_to_glb(tmp_dir_path.path(), &output_path, min_zoom, max_zoom).unwrap();
+    let tile_contents = export_tiles_to_glb(
+        tmp_tiled_file_dir_path.path(),
+        &output_path,
+        min_zoom,
+        max_zoom,
+    )
+    .unwrap();
     log::info!("Finish exporting tiles in {:?}", start_local.elapsed());
+
+    drop(tmp_tiled_file_dir_path);
 
     let mut tree = TileTree::default();
     for content in tile_contents {
