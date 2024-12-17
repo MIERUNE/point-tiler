@@ -2,7 +2,7 @@ use std::collections::HashMap;
 use std::convert::Infallible;
 use std::ffi::OsStr;
 use std::fs::File;
-use std::io::{Read as _, Write};
+use std::io::{BufWriter, Read as _, Write};
 use std::sync::{mpsc, Arc};
 use std::thread;
 use std::{
@@ -17,7 +17,10 @@ use clap::Parser;
 use env_logger::Builder;
 use glob::glob;
 use gzp::MgzipSyncReader;
-use gzp::{deflate::Mgzip, par::compress::{ParCompress, ParCompressBuilder}};
+use gzp::{
+    deflate::Mgzip,
+    par::compress::{ParCompress, ParCompressBuilder},
+};
 use itertools::Itertools as _;
 use log::LevelFilter;
 use pcd_parser::reader::csv::CsvPointReader;
@@ -27,6 +30,7 @@ use pcd_transformer::projection::transform_point;
 use projection_transform::vshift::Jgd2011ToWgs84;
 use rayon::iter::{IntoParallelRefIterator as _, ParallelIterator as _};
 use tempfile::tempdir;
+use tinymvt::tileid::hilbert;
 
 use pcd_core::pointcloud::{
     decimation::decimator::{PointCloudDecimator, VoxelDecimator},
@@ -40,7 +44,6 @@ use pcd_exporter::{
 };
 use pcd_parser::parser::{get_extension, Extension};
 use projection_transform::cartesian::geodetic_to_geocentric;
-use tinymvt::tileid::hilbert;
 
 #[derive(Parser, Debug)]
 #[command(
@@ -67,6 +70,9 @@ struct Cli {
 
     #[arg(long, default_value_t = 4 * 1024)]
     max_memory_mb: usize,
+
+    #[arg(long)]
+    gzip_compress: bool,
 }
 
 fn check_and_get_extension(paths: &[PathBuf]) -> Result<Extension, String> {
@@ -205,6 +211,7 @@ fn export_tiles_to_glb(
     output_path: &Path,
     min_zoom: u8,
     max_zoom: u8,
+    gzip_compress: bool,
 ) -> std::io::Result<Vec<TileContent>> {
     let mut all_tiles = Vec::new();
     for z in min_zoom..=max_zoom {
@@ -249,8 +256,16 @@ fn export_tiles_to_glb(
             let glb_path = output_path.join(&tile_content.content_path);
             fs::create_dir_all(glb_path.parent().unwrap()).unwrap();
             let glb = generate_quantized_glb(decimated).unwrap();
-            let writer = File::create(glb_path).unwrap();
-            glb.to_writer_with_alignment(writer, 8).unwrap();
+
+            if gzip_compress {
+                let file = File::create(glb_path).unwrap();
+                let writer: ParCompress<Mgzip> = ParCompressBuilder::new().from_writer(file);
+                glb.to_writer_with_alignment(writer, 8).unwrap();
+            } else {
+                let file = File::create(glb_path).unwrap();
+                let writer = BufWriter::new(file);
+                glb.to_writer_with_alignment(writer, 8).unwrap();
+            }
 
             tile_content
         })
@@ -353,6 +368,7 @@ fn main() {
     log::info!("min zoom: {}", args.min);
     log::info!("max zoom: {}", args.max);
     log::info!("max memory mb: {}", args.max_memory_mb);
+    log::info!("gzip compress: {}", args.gzip_compress);
 
     let start = std::time::Instant::now();
 
@@ -521,6 +537,7 @@ fn main() {
         &output_path,
         min_zoom,
         max_zoom,
+        args.gzip_compress,
     )
     .unwrap();
     log::info!("Finish exporting tiles in {:?}", start_local.elapsed());
