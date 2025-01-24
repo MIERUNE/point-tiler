@@ -2,7 +2,7 @@ name: Release
 on:
   push:
     branches:
-      - feature/*
+      - build-linux-and-windows
   release:
     types: [published]
 
