@@ -1,8 +1,5 @@
 name: Release
 on:
-  push:
-    branches:
-      - build-linux-and-windows
   release:
     types: [published]
 
@@ -17,8 +14,8 @@ jobs:
         job:
           - {os: macos-latest, target: x86_64-apple-darwin, extension: ''}
           - {os: macos-latest, target: aarch64-apple-darwin, extension: ''}
-          - {os: linux-latest, target: x86_64-unknown-linux-gnu, extension: ''}
-          - {os: linux-latest, target: x86_64-unknown-linux-musl, extension: ''}
+          - {os: ubuntu-latest, target: x86_64-unknown-linux-gnu, extension: ''}
+          - {os: ubuntu-latest, target: x86_64-unknown-linux-musl, extension: ''}
           - {os: windows-latest, target: x86_64-pc-windows-msvc, extension: '.exe'}
     permissions:
       contents: write
