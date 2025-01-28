@@ -34,6 +34,7 @@ After installing Rust, download this repository.
 - `min`: Specify the minimum zoom level you want to output.
 - `max`: Specify the maximum zoom level you want to output.
 - `max-memory-mb`: Specify the number of MB of memory available for conversion.
+- `quantize`: Perform quantization.
 - `--gzip-compress`: The output 3D Tiles are compressed using gzip. The file extension dose not change.
 
 In the repository root, the following commands can be executed.
@@ -45,7 +46,8 @@ point_tiler --input app/examples/data/sample.las \
     --output-epsg 4979 \
     --min 15 \
     --max 18 \
-    --max-memory-mb 8192 \
+    --max-memory-mb 8193 \
+    --quantize \
     --gzip-compress
 ```
 
