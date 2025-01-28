@@ -23,6 +23,7 @@ use gzp::{
 };
 use itertools::Itertools as _;
 use log::LevelFilter;
+use pcd_exporter::gltf::generate_glb;
 use pcd_parser::reader::csv::CsvPointReader;
 use pcd_parser::reader::las::LasPointReader;
 use pcd_parser::reader::PointReader;
@@ -73,6 +74,9 @@ struct Cli {
 
     #[arg(long, default_value_t = 4 * 1024)]
     max_memory_mb: usize,
+
+    #[arg(long)]
+    quantize: bool,
 
     #[arg(long)]
     gzip_compress: bool,
@@ -214,6 +218,7 @@ fn export_tiles_to_glb(
     output_path: &Path,
     min_zoom: u8,
     max_zoom: u8,
+    quantize: bool,
     gzip_compress: bool,
 ) -> std::io::Result<Vec<TileContent>> {
     let mut all_tiles = Vec::new();
@@ -258,7 +263,12 @@ fn export_tiles_to_glb(
 
             let glb_path = output_path.join(&tile_content.content_path);
             fs::create_dir_all(glb_path.parent().unwrap()).unwrap();
-            let glb = generate_quantized_glb(decimated).unwrap();
+
+            let glb = if quantize {
+                generate_quantized_glb(decimated).unwrap()
+            } else {
+                generate_glb(decimated).unwrap()
+            };
 
             if gzip_compress {
                 let file = File::create(glb_path).unwrap();
@@ -372,6 +382,7 @@ fn main() {
     log::info!("min zoom: {}", args.min);
     log::info!("max zoom: {}", args.max);
     log::info!("max memory mb: {}", args.max_memory_mb);
+    log::info!("quantize: {}", args.quantize);
     log::info!("gzip compress: {}", args.gzip_compress);
 
     let start = std::time::Instant::now();
@@ -541,6 +552,7 @@ fn main() {
         &output_path,
         min_zoom,
         max_zoom,
+        args.quantize,
         args.gzip_compress,
     )
     .unwrap();
