@@ -51,6 +51,10 @@ point_tiler --input app/examples/data/sample.las \
     --gzip-compress
 ```
 
+This tool has a unique concept called a `zoom level` which represents a planar area roughly the same size as 2D tiles such as raster tiles or Google Photorealistic 3D Tiles.
+The geometric error varies depending on the zoom level for example, it is approximately 64.0 at zoom level 15, about 8.0 at zoom level 18, and about 1.0 at zoom level 21.
+The output tiles are thinned out so that one point is stored in a voxel grid of `Geometric Error × 0.1`.
+
 ### CSV/TXT
 
 It supports .csv and .txt file extensions.
