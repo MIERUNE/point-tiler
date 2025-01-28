@@ -57,6 +57,7 @@ fn transform_from_jgd2011(
 ) -> Point {
     let output_epsg = EPSG_WGS84_GEOGRAPHIC_3D;
 
+    // TODO: 6697のまま（ジオイド高を足さない）の処理に対応する
     match output_epsg {
         EPSG_WGS84_GEOGRAPHIC_3D => {
             let x = point.x;
