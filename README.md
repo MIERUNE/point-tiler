@@ -46,7 +46,7 @@ point_tiler --input app/examples/data/sample.las \
     --output-epsg 4979 \
     --min 15 \
     --max 18 \
-    --max-memory-mb 8193 \
+    --max-memory-mb 8192 \
     --quantize \
     --gzip-compress
 ```
