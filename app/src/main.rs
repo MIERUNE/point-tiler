@@ -60,7 +60,10 @@ struct Cli {
     output: String,
 
     #[arg(short, long, required = true)]
-    epsg: u16,
+    input_epsg: u16,
+
+    #[arg(short, long, required = true)]
+    output_epsg: u16,
 
     #[arg(long, default_value_t = 15)]
     min: u8,
@@ -364,7 +367,8 @@ fn main() {
 
     log::info!("input files: {:?}", args.input);
     log::info!("output folder: {}", args.output);
-    log::info!("input EPSG: {}", args.epsg);
+    log::info!("input EPSG: {}", args.input_epsg);
+    log::info!("output EPSG: {}", args.output_epsg);
     log::info!("min zoom: {}", args.min);
     log::info!("max zoom: {}", args.max);
     log::info!("max memory mb: {}", args.max_memory_mb);
@@ -437,7 +441,7 @@ fn main() {
         let mut keyed_points: Vec<(SortKey, Point)> = chunk
             .into_iter()
             .map(|p| {
-                let transformed = transform_point(p, args.epsg, &jgd2wgs);
+                let transformed = transform_point(p, args.input_epsg, args.output_epsg, &jgd2wgs);
 
                 let tile_coords =
                     tiling::scheme::zxy_from_lng_lat(max_zoom, transformed.x, transformed.y);

@@ -1,7 +1,12 @@
 use pcd_core::pointcloud::point::Point;
 use projection_transform::{crs::*, jprect::JPRZone, vshift::Jgd2011ToWgs84};
 
-pub fn transform_point(point: Point, input_epsg: EpsgCode, jgd2wgs: &Jgd2011ToWgs84) -> Point {
+pub fn transform_point(
+    point: Point,
+    input_epsg: EpsgCode,
+    output_epsg: EpsgCode,
+    jgd2wgs: &Jgd2011ToWgs84,
+) -> Point {
     match input_epsg {
         EPSG_JGD2011_JPRECT_I
         | EPSG_JGD2011_JPRECT_II
@@ -35,7 +40,7 @@ pub fn transform_point(point: Point, input_epsg: EpsgCode, jgd2wgs: &Jgd2011ToWg
         | EPSG_JGD2011_JPRECT_XI_JGD2011_HEIGHT
         | EPSG_JGD2011_JPRECT_XII_JGD2011_HEIGHT
         | EPSG_JGD2011_JPRECT_XIII_JGD2011_HEIGHT => {
-            transform_from_jgd2011(point, Some(input_epsg), jgd2wgs)
+            transform_from_jgd2011(point, Some(input_epsg), Some(output_epsg), jgd2wgs)
         }
         _ => {
             panic!("Unsupported input CRS: {}", input_epsg);
@@ -53,11 +58,10 @@ fn rectangular_to_lnglat(x: f64, y: f64, height: f64, input_epsg: EpsgCode) -> (
 fn transform_from_jgd2011(
     point: Point,
     rectangular: Option<EpsgCode>,
+    output_epsg: Option<EpsgCode>,
     jgd2wgs: &Jgd2011ToWgs84,
 ) -> Point {
-    let output_epsg = EPSG_WGS84_GEOGRAPHIC_3D;
-
-    match output_epsg {
+    match output_epsg.unwrap() {
         EPSG_WGS84_GEOGRAPHIC_3D => {
             let x = point.x;
             let y = point.y;
@@ -79,8 +83,27 @@ fn transform_from_jgd2011(
                 attributes: point.attributes.clone(),
             }
         }
+        EPSG_JGD2011_GEOGRAPHIC_3D => {
+            let x = point.x;
+            let y = point.y;
+            let z = point.z;
+
+            let (lng, lat, height) = if let Some(input_epsg) = rectangular {
+                rectangular_to_lnglat(x, y, z, input_epsg)
+            } else {
+                (x, y, z)
+            };
+
+            Point {
+                x: lng,
+                y: lat,
+                z: height,
+                color: point.color.clone(),
+                attributes: point.attributes.clone(),
+            }
+        }
         _ => {
-            panic!("Unsupported output CRS: {}", output_epsg);
+            panic!("Unsupported output CRS: {:?}", output_epsg);
         }
     }
 }
