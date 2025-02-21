@@ -16,11 +16,11 @@ use chrono::Local;
 use clap::Parser;
 use env_logger::Builder;
 use glob::glob;
-use gzp::MgzipSyncReader;
-use gzp::{
-    deflate::Mgzip,
-    par::compress::{ParCompress, ParCompressBuilder},
-};
+// use gzp::MgzipSyncReader;
+// use gzp::{
+//     deflate::Mgzip,
+//     par::compress::{ParCompress, ParCompressBuilder},
+// };
 use itertools::Itertools as _;
 use log::LevelFilter;
 use pcd_exporter::gltf::generate_glb;
@@ -129,7 +129,8 @@ fn write_points_to_tile(
     fs::create_dir_all(tile_path.parent().unwrap())?;
 
     let file = File::create(tile_path)?;
-    let mut writer: ParCompress<Mgzip> = ParCompressBuilder::new().from_writer(file);
+    // let mut writer: ParCompress<Mgzip> = ParCompressBuilder::new().from_writer(file);
+    let mut writer = BufWriter::new(file);
 
     let encoded = bitcode::encode(points);
     writer.write_all(&encoded)?;
@@ -139,7 +140,8 @@ fn write_points_to_tile(
 
 fn read_points_from_tile(file_path: &Path) -> std::io::Result<Vec<Point>> {
     let file = File::open(file_path)?;
-    let mut buf_reader = MgzipSyncReader::new(file);
+    // let mut buf_reader = MgzipSyncReader::new(file);
+    let mut buf_reader = file;
     let mut buffer = Vec::new();
     buf_reader.read_to_end(&mut buffer).unwrap();
     let points = bitcode::decode(&buffer).unwrap();
@@ -272,7 +274,8 @@ fn export_tiles_to_glb(
 
             if gzip_compress {
                 let file = File::create(glb_path).unwrap();
-                let writer: ParCompress<Mgzip> = ParCompressBuilder::new().from_writer(file);
+                // let writer: ParCompress<Mgzip> = ParCompressBuilder::new().from_writer(file);
+                let writer = BufWriter::new(file);
                 glb.to_writer_with_alignment(writer, 8).unwrap();
             } else {
                 let file = File::create(glb_path).unwrap();
@@ -327,7 +330,8 @@ impl RunFileIterator {
 
     fn read_run_file(path: PathBuf) -> Result<Vec<(SortKey, Point)>, Infallible> {
         let file = File::open(path).unwrap();
-        let mut buf_reader = MgzipSyncReader::new(file);
+        // let mut buf_reader = MgzipSyncReader::new(file);
+        let mut buf_reader = file;
         let mut buffer = Vec::new();
         buf_reader.read_to_end(&mut buffer).unwrap();
         let data: Vec<(SortKey, Point)> = bitcode::decode(&buffer[..]).unwrap();
@@ -469,7 +473,8 @@ fn main() {
             .path()
             .join(format!("run_{}.bin", current_run_index));
         let file = fs::File::create(run_file_path).unwrap();
-        let mut writer: ParCompress<Mgzip> = ParCompressBuilder::new().from_writer(file);
+        // let mut writer: ParCompress<Mgzip> = ParCompressBuilder::new().from_writer(file);
+        let mut writer = BufWriter::new(file);
 
         let encoded = bitcode::encode(&keyed_points);
         writer.write_all(&encoded).unwrap();
@@ -526,7 +531,8 @@ fn main() {
         fs::create_dir_all(tile_path.parent().unwrap()).unwrap();
 
         let file = fs::File::create(tile_path).unwrap();
-        let mut writer: ParCompress<Mgzip> = ParCompressBuilder::new().from_writer(file);
+        // let mut writer: ParCompress<Mgzip> = ParCompressBuilder::new().from_writer(file);
+        let mut writer = BufWriter::new(file);
 
         let encoded = bitcode::encode(&points);
         writer.write_all(&encoded).unwrap();
