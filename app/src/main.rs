@@ -208,10 +208,6 @@ fn aggregate_zoom_level(base_path: &Path, z: u8) -> std::io::Result<()> {
         }
     }
 
-    // for (parent_tile, pts) in parent_map {
-    //     write_points_to_tile(base_path, parent_tile, &pts)?;
-    // }
-
     parent_map
         .into_par_iter()
         .try_for_each(|(parent_tile, pts)| -> std::io::Result<()> {
@@ -399,8 +395,6 @@ fn in_memory_workflow(
 
     let mut all_points = Vec::new();
     while let Ok(Some(p)) = reader.next_point() {
-        // let transformed = transform_point(p, args.input_epsg, args.output_epsg, &jgd2wgs);
-        // all_points.push(transformed);
         all_points.push(p);
     }
 
@@ -408,19 +402,6 @@ fn in_memory_workflow(
         "Finish transforming and tiling in {:?}",
         start_local.elapsed()
     );
-
-    // log::info!("start sorting...");
-    // let start_local = std::time::Instant::now();
-    // let max_zoom = args.max;
-    // let mut keyed_points: Vec<(SortKey, Point)> = all_points
-    //     .into_iter()
-    //     .map(|p| {
-    //         let (z, x, y) = tiling::scheme::zxy_from_lng_lat(max_zoom, p.x, p.y);
-    //         let tile_id = TileIdMethod::Hilbert.zxy_to_id(z, x, y);
-    //         (SortKey { tile_id }, p)
-    //     })
-    //     .collect();
-    // keyed_points.sort_by_key(|(k, _)| k.tile_id);
 
     log::info!("start grouping...");
     let start_local = std::time::Instant::now();
@@ -476,34 +457,6 @@ fn in_memory_workflow(
         })?;
 
     log::info!("Wrote tile files in {:?}", start_local.elapsed());
-
-    // {
-    //     let mut current_tile_id = None;
-    //     let mut buffer = Vec::new();
-
-    //     for (sort_key, point) in keyed_points {
-    //         match current_tile_id {
-    //             Some(tid) if tid == sort_key.tile_id => {
-    //                 buffer.push(point);
-    //             }
-    //             _ => {
-    //                 if let Some(tid) = current_tile_id {
-    //                     let tile_coords = TileIdMethod::Hilbert.id_to_zxy(tid);
-    //                     write_points_to_tile(tmp_tiled_file_dir_path.path(), tile_coords, &buffer)?;
-    //                 }
-    //                 current_tile_id = Some(sort_key.tile_id);
-    //                 buffer.clear();
-    //                 buffer.push(point);
-    //             }
-    //         }
-    //     }
-    //     if let Some(tid) = current_tile_id {
-    //         let tile_coords = TileIdMethod::Hilbert.id_to_zxy(tid);
-    //         write_points_to_tile(tmp_tiled_file_dir_path.path(), tile_coords, &buffer)?;
-    //     }
-    // }
-
-    // log::info!("Finish sorting in {:?}", start_local.elapsed());
 
     log::info!("start zoom aggregation...");
     let start_local = std::time::Instant::now();
