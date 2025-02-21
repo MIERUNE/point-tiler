@@ -29,7 +29,7 @@ use pcd_parser::reader::las::LasPointReader;
 use pcd_parser::reader::PointReader;
 use pcd_transformer::projection::transform_point;
 use projection_transform::vshift::Jgd2011ToWgs84;
-use rayon::iter::{IntoParallelRefIterator as _, ParallelIterator as _};
+use rayon::iter::{IntoParallelIterator as _, IntoParallelRefIterator as _, ParallelIterator as _};
 use tempfile::tempdir;
 use tinymvt::tileid::hilbert;
 
@@ -208,9 +208,16 @@ fn aggregate_zoom_level(base_path: &Path, z: u8) -> std::io::Result<()> {
         }
     }
 
-    for (parent_tile, pts) in parent_map {
-        write_points_to_tile(base_path, parent_tile, &pts)?;
-    }
+    // for (parent_tile, pts) in parent_map {
+    //     write_points_to_tile(base_path, parent_tile, &pts)?;
+    // }
+
+    parent_map
+        .into_par_iter()
+        .try_for_each(|(parent_tile, pts)| -> std::io::Result<()> {
+            write_points_to_tile(base_path, parent_tile, &pts)?;
+            Ok(())
+        })?;
 
     Ok(())
 }
