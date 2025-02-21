@@ -434,7 +434,8 @@ fn main() {
         };
 
         while let Ok(Some(p)) = reader.next_point() {
-            buffer.push(p);
+            let transformed = transform_point(p, args.input_epsg, args.output_epsg, &jgd2wgs);
+            buffer.push(transformed);
             if buffer.len() >= default_chunk_points_len {
                 if tx.send(buffer.clone()).is_err() {
                     break;
@@ -452,14 +453,13 @@ fn main() {
         let mut keyed_points: Vec<(SortKey, Point)> = chunk
             .into_iter()
             .map(|p| {
-                let transformed = transform_point(p, args.input_epsg, args.output_epsg, &jgd2wgs);
+                // let transformed = transform_point(p, args.input_epsg, args.output_epsg, &jgd2wgs);
 
-                let tile_coords =
-                    tiling::scheme::zxy_from_lng_lat(max_zoom, transformed.x, transformed.y);
+                let tile_coords = tiling::scheme::zxy_from_lng_lat(max_zoom, p.x, p.y);
                 let tile_id =
                     TileIdMethod::Hilbert.zxy_to_id(tile_coords.0, tile_coords.1, tile_coords.2);
 
-                (SortKey { tile_id }, transformed)
+                (SortKey { tile_id }, p)
             })
             .collect();
 
