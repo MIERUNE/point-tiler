@@ -16,5 +16,8 @@ opt-level = 3
 
 [profile.release-lto]
 inherits = "release"
-codegen-units = 8
+codegen-units = 1
 lto = "fat"
+opt-level = 3
+panic = "abort"
+strip = true
