@@ -397,7 +397,7 @@ fn in_memory_workflow(
                     Box::new(CsvPointReader::new(vec![file.clone()]).unwrap())
                 }
             };
-            
+
             let mut points = Vec::new();
             while let Ok(Some(p)) = reader.next_point() {
                 points.push(p);
@@ -535,7 +535,7 @@ fn external_sort_workflow(
         if channel_capacity == 0 {
             channel_capacity = 1;
         }
-        
+
         // CPUコア数を考慮したチャンネル容量の最適化
         let num_cores = num_cpus::get();
         channel_capacity = std::cmp::max(channel_capacity, num_cores * 2);
@@ -554,13 +554,13 @@ fn external_sort_workflow(
         // 複数のリーダースレッドを起動
         let chunk_size = (input_files.len() + num_cores - 1) / num_cores;
         let mut handles = vec![];
-        
+
         for chunk in input_files.chunks(chunk_size) {
             let chunk = chunk.to_vec();
             let tx = tx.clone();
             let jgd2wgs_clone = Arc::clone(&jgd2wgs);
             let extension_copy = extension; // extensionをコピー
-            
+
             let handle = thread::spawn(move || {
                 let mut buffer = Vec::with_capacity(default_chunk_points_len);
                 let mut reader: Box<dyn PointReader> = match extension_copy {
@@ -571,7 +571,7 @@ fn external_sort_workflow(
                         Box::new(CsvPointReader::new(chunk).unwrap())
                     }
                 };
-                
+
                 while let Ok(Some(p)) = reader.next_point() {
                     let transformed = transform_point(p, epsg_in, epsg_out, &jgd2wgs_clone);
                     buffer.push(transformed);
@@ -588,7 +588,7 @@ fn external_sort_workflow(
             });
             handles.push(handle);
         }
-        
+
         // 送信側のチャンネルを閉じるためにdropする
         drop(tx);
 
