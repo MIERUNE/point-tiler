@@ -3,7 +3,7 @@ members = [
     "app",
     "pcd-*",
     "cesiumtiles-gltf",
-    "projection-transform",
+    "projection-transform", "data-downloader",
 ]
 resolver = "2"
 
