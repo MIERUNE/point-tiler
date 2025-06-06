@@ -118,6 +118,7 @@ dependencies = [
  "itertools",
  "kv-extsort",
  "log",
+ "num_cpus",
  "pcd-core",
  "pcd-exporter",
  "pcd-parser",
