@@ -552,7 +552,7 @@ fn external_sort_workflow(
         let (tx, rx) = mpsc::sync_channel::<Vec<Point>>(channel_capacity);
 
         // 複数のリーダースレッドを起動
-        let chunk_size = (input_files.len() + num_cores - 1) / num_cores;
+        let chunk_size = input_files.len().div_ceil(num_cores);
         let mut handles = vec![];
 
         for chunk in input_files.chunks(chunk_size) {
