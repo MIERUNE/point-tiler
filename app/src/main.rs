@@ -60,10 +60,10 @@ struct Cli {
     #[arg(short, long, required = true, value_name = "DIR")]
     output: String,
 
-    #[arg(short, long, required = true)]
+    #[arg(long, required = true)]
     input_epsg: u16,
 
-    #[arg(short, long, required = true)]
+    #[arg(long, required = true)]
     output_epsg: u16,
 
     #[arg(long, default_value_t = 15)]
@@ -381,22 +381,30 @@ fn in_memory_workflow(
     let jgd2wgs = Arc::new(Jgd2011ToWgs84::default());
 
     let extension = check_and_get_extension(&input_files).unwrap();
-    let mut reader: Box<dyn PointReader> = match extension {
-        Extension::Las | Extension::Laz => {
-            Box::new(LasPointReader::new(input_files.clone()).unwrap())
-        }
-        Extension::Csv | Extension::Txt => {
-            Box::new(CsvPointReader::new(input_files.clone()).unwrap())
-        }
-    };
 
     log::info!("start parse and transform and tiling...");
     let start_local = std::time::Instant::now();
 
-    let mut all_points = Vec::new();
-    while let Ok(Some(p)) = reader.next_point() {
-        all_points.push(p);
-    }
+    // 複数ファイルを並列に読み込む
+    let all_points: Vec<Point> = input_files
+        .par_iter()
+        .flat_map(|file| {
+            let mut reader: Box<dyn PointReader> = match extension {
+                Extension::Las | Extension::Laz => {
+                    Box::new(LasPointReader::new(vec![file.clone()]).unwrap())
+                }
+                Extension::Csv | Extension::Txt => {
+                    Box::new(CsvPointReader::new(vec![file.clone()]).unwrap())
+                }
+            };
+
+            let mut points = Vec::new();
+            while let Ok(Some(p)) = reader.next_point() {
+                points.push(p);
+            }
+            points
+        })
+        .collect();
 
     log::info!(
         "Finish transforming and tiling in {:?}",
@@ -528,41 +536,61 @@ fn external_sort_workflow(
             channel_capacity = 1;
         }
 
+        // CPUコア数を考慮したチャンネル容量の最適化
+        let num_cores = num_cpus::get();
+        channel_capacity = std::cmp::max(channel_capacity, num_cores * 2);
+
         let extension = check_and_get_extension(&input_files).unwrap();
-        let input_files_clone = input_files.clone();
         let epsg_in = args.input_epsg;
         let epsg_out = args.output_epsg;
 
         log::info!("max_memory_mb_bytes: {}", max_memory_mb_bytes);
         log::info!("one_chunk_mem: {}", one_chunk_mem);
         log::info!("channel_capacity: {}", channel_capacity);
+        log::info!("num_cores: {}", num_cores);
 
         let (tx, rx) = mpsc::sync_channel::<Vec<Point>>(channel_capacity);
 
-        let handle = thread::spawn(move || {
-            let mut buffer = Vec::with_capacity(default_chunk_points_len);
-            let mut reader: Box<dyn PointReader> = match extension {
-                Extension::Las | Extension::Laz => {
-                    Box::new(LasPointReader::new(input_files_clone).unwrap())
-                }
-                Extension::Csv | Extension::Txt => {
-                    Box::new(CsvPointReader::new(input_files_clone).unwrap())
-                }
-            };
-            while let Ok(Some(p)) = reader.next_point() {
-                let transformed = transform_point(p, epsg_in, epsg_out, &jgd2wgs);
-                buffer.push(transformed);
-                if buffer.len() >= default_chunk_points_len {
-                    if tx.send(buffer.clone()).is_err() {
-                        break;
+        // 複数のリーダースレッドを起動
+        let chunk_size = input_files.len().div_ceil(num_cores);
+        let mut handles = vec![];
+
+        for chunk in input_files.chunks(chunk_size) {
+            let chunk = chunk.to_vec();
+            let tx = tx.clone();
+            let jgd2wgs_clone = Arc::clone(&jgd2wgs);
+            let extension_copy = extension;
+
+            let handle = thread::spawn(move || {
+                let mut buffer = Vec::with_capacity(default_chunk_points_len);
+                let mut reader: Box<dyn PointReader> = match extension_copy {
+                    Extension::Las | Extension::Laz => {
+                        Box::new(LasPointReader::new(chunk).unwrap())
                     }
-                    buffer = Vec::with_capacity(default_chunk_points_len);
+                    Extension::Csv | Extension::Txt => {
+                        Box::new(CsvPointReader::new(chunk).unwrap())
+                    }
+                };
+
+                while let Ok(Some(p)) = reader.next_point() {
+                    let transformed = transform_point(p, epsg_in, epsg_out, &jgd2wgs_clone);
+                    buffer.push(transformed);
+                    if buffer.len() >= default_chunk_points_len {
+                        if tx.send(buffer.clone()).is_err() {
+                            break;
+                        }
+                        buffer = Vec::with_capacity(default_chunk_points_len);
+                    }
                 }
-            }
-            if !buffer.is_empty() {
-                tx.send(buffer.clone()).unwrap();
-            }
-        });
+                if !buffer.is_empty() {
+                    let _ = tx.send(buffer);
+                }
+            });
+            handles.push(handle);
+        }
+
+        // 送信側のチャンネルを閉じるためにdropする
+        drop(tx);
 
         for (current_run_index, chunk) in rx.into_iter().enumerate() {
             let mut keyed_points: Vec<(SortKey, Point)> = chunk
@@ -594,7 +622,9 @@ fn external_sort_workflow(
             writer.write_all(&encoded).unwrap();
         }
 
-        handle.join().expect("Reading thread panicked");
+        for handle in handles {
+            handle.join().expect("Reading thread panicked");
+        }
 
         log::info!(
             "Finish transforming and tiling in {:?}",
@@ -712,6 +742,12 @@ fn external_sort_workflow(
 }
 
 fn main() -> std::io::Result<()> {
+    // Rayonのグローバルスレッドプールを設定
+    rayon::ThreadPoolBuilder::new()
+        .num_threads(num_cpus::get() * 2)
+        .build_global()
+        .unwrap();
+
     Builder::new()
         .format(|buf, record| {
             writeln!(

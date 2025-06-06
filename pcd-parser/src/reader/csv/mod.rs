@@ -122,7 +122,7 @@ impl CsvPointReader {
             let has_headers = !headers.iter().all(|h| h.trim().is_empty());
 
             let mapping = create_field_mapping(&headers, has_headers)
-                .map_err(|e| io::Error::new(io::ErrorKind::Other, e))?;
+                .map_err(io::Error::other)?;
 
             self.field_mapping = mapping;
             self.current_reader = Some(rdr);
@@ -228,7 +228,7 @@ impl PointReader for CsvPointReader {
                     Ok(p) => return Ok(Some(p)),
                     Err(e) => {
                         eprintln!("Error parsing CSV point: {}", e);
-                        return Err(io::Error::new(io::ErrorKind::Other, format!("{}", e)));
+                        return Err(io::Error::other(format!("{}", e)));
                     }
                 },
                 Ok(false) => {
@@ -236,7 +236,7 @@ impl PointReader for CsvPointReader {
                 }
                 Err(e) => {
                     eprintln!("Error reading CSV record: {}", e);
-                    return Err(io::Error::new(io::ErrorKind::Other, e));
+                    return Err(io::Error::other(e));
                 }
             }
         }

@@ -91,7 +91,7 @@ impl PointReader for LasPointReader {
                 }
                 Some(Err(e)) => {
                     eprintln!("Error reading LAS point: {}", e);
-                    return Err(io::Error::new(io::ErrorKind::Other, e));
+                    return Err(io::Error::other(e));
                 }
                 None => {
                     self.current_reader = None;

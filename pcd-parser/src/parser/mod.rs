@@ -13,6 +13,7 @@ pub trait Parser {
     fn parse(&self) -> Result<PointCloud, Box<dyn Error>>;
 }
 
+#[derive(Debug, Clone, Copy)]
 pub enum Extension {
     Las,
     Laz,
