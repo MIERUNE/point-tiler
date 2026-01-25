@@ -44,7 +44,7 @@ impl Parser for LasParser {
                 let attributes = PointAttributes {
                     intensity: Some(las_point.intensity),
                     return_number: Some(las_point.return_number),
-                    classification: Some(format!("{:?}", las_point.classification)),
+                    classification: None,
                     scanner_channel: Some(las_point.user_data),
                     scan_angle: Some(las_point.scan_angle),
                     user_data: Some(las_point.user_data),

@@ -144,7 +144,7 @@ pub fn generate_glb<'a>(
 
     Ok(cesiumtiles_gltf::glb::Glb {
         json: serde_json::to_vec(&gltf).unwrap().into(),
-        bin: Some(bin_content.clone().into()),
+        bin: Some(bin_content.into()),
     })
 }
 
@@ -293,6 +293,6 @@ pub fn generate_quantized_glb<'a>(
 
     Ok(cesiumtiles_gltf::glb::Glb {
         json: serde_json::to_vec(&gltf).unwrap().into(),
-        bin: Some(bin_content.clone().into()),
+        bin: Some(bin_content.into()),
     })
 }

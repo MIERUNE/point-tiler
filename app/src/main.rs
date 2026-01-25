@@ -576,10 +576,13 @@ fn external_sort_workflow(
                     let transformed = transform_point(p, epsg_in, epsg_out, &jgd2wgs_clone);
                     buffer.push(transformed);
                     if buffer.len() >= default_chunk_points_len {
-                        if tx.send(buffer.clone()).is_err() {
+                        let to_send = std::mem::replace(
+                            &mut buffer,
+                            Vec::with_capacity(default_chunk_points_len),
+                        );
+                        if tx.send(to_send).is_err() {
                             break;
                         }
-                        buffer = Vec::with_capacity(default_chunk_points_len);
                     }
                 }
                 if !buffer.is_empty() {

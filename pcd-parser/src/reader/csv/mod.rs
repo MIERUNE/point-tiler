@@ -121,8 +121,7 @@ impl CsvPointReader {
             let headers = rdr.headers()?.clone();
             let has_headers = !headers.iter().all(|h| h.trim().is_empty());
 
-            let mapping = create_field_mapping(&headers, has_headers)
-                .map_err(io::Error::other)?;
+            let mapping = create_field_mapping(&headers, has_headers).map_err(io::Error::other)?;
 
             self.field_mapping = mapping;
             self.current_reader = Some(rdr);

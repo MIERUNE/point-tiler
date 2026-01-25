@@ -1,5 +1,13 @@
+use std::cell::RefCell;
+
 use pcd_core::pointcloud::point::Point;
-use projection_transform::{crs::*, jprect::JPRZone, vshift::Jgd2011ToWgs84};
+use projection_transform::{
+    crs::*, etmerc::ExtendedTransverseMercatorProjection, jprect::JPRZone, vshift::Jgd2011ToWgs84,
+};
+
+thread_local! {
+    static PROJECTION_CACHE: RefCell<Option<(EpsgCode, ExtendedTransverseMercatorProjection)>> = const { RefCell::new(None) };
+}
 
 pub fn transform_point(
     point: Point,
@@ -49,10 +57,27 @@ pub fn transform_point(
 }
 
 fn rectangular_to_lnglat(x: f64, y: f64, height: f64, input_epsg: EpsgCode) -> (f64, f64, f64) {
-    let zone = JPRZone::from_epsg(input_epsg).unwrap();
-    let proj = zone.projection();
-    let (lng, lat, height) = proj.project_inverse(x, y, height).unwrap();
-    (lng, lat, height)
+    PROJECTION_CACHE.with(|cache| {
+        let mut cache = cache.borrow_mut();
+
+        let proj = if let Some((cached_epsg, ref cached_proj)) = *cache {
+            if cached_epsg == input_epsg {
+                cached_proj
+            } else {
+                let zone = JPRZone::from_epsg(input_epsg).unwrap();
+                let new_proj = zone.projection();
+                *cache = Some((input_epsg, new_proj));
+                &cache.as_ref().unwrap().1
+            }
+        } else {
+            let zone = JPRZone::from_epsg(input_epsg).unwrap();
+            let new_proj = zone.projection();
+            *cache = Some((input_epsg, new_proj));
+            &cache.as_ref().unwrap().1
+        };
+
+        proj.project_inverse(x, y, height).unwrap()
+    })
 }
 
 fn transform_from_jgd2011(
@@ -61,47 +86,32 @@ fn transform_from_jgd2011(
     output_epsg: Option<EpsgCode>,
     jgd2wgs: &Jgd2011ToWgs84,
 ) -> Point {
+    let (x, y, z) = (point.x, point.y, point.z);
+
+    let (lng, lat, height) = if let Some(input_epsg) = rectangular {
+        rectangular_to_lnglat(x, y, z, input_epsg)
+    } else {
+        (x, y, z)
+    };
+
     match output_epsg.unwrap() {
         EPSG_WGS84_GEOGRAPHIC_3D => {
-            let x = point.x;
-            let y = point.y;
-            let z = point.z;
-
-            let (lng, lat, height) = if let Some(input_epsg) = rectangular {
-                rectangular_to_lnglat(x, y, z, input_epsg)
-            } else {
-                (x, y, z)
-            };
-
             let (lng, lat, height) = jgd2wgs.convert(lng, lat, height);
-
             Point {
                 x: lng,
                 y: lat,
                 z: height,
-                color: point.color.clone(),
-                attributes: point.attributes.clone(),
+                color: point.color,
+                attributes: point.attributes,
             }
         }
-        EPSG_JGD2011_GEOGRAPHIC_3D => {
-            let x = point.x;
-            let y = point.y;
-            let z = point.z;
-
-            let (lng, lat, height) = if let Some(input_epsg) = rectangular {
-                rectangular_to_lnglat(x, y, z, input_epsg)
-            } else {
-                (x, y, z)
-            };
-
-            Point {
-                x: lng,
-                y: lat,
-                z: height,
-                color: point.color.clone(),
-                attributes: point.attributes.clone(),
-            }
-        }
+        EPSG_JGD2011_GEOGRAPHIC_3D => Point {
+            x: lng,
+            y: lat,
+            z: height,
+            color: point.color,
+            attributes: point.attributes,
+        },
         _ => {
             panic!("Unsupported output CRS: {:?}", output_epsg);
         }
