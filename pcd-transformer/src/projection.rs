@@ -5,7 +5,6 @@ use projection_transform::{
     crs::*, etmerc::ExtendedTransverseMercatorProjection, jprect::JPRZone, vshift::Jgd2011ToWgs84,
 };
 
-// スレッドローカルに projection をキャッシュ
 thread_local! {
     static PROJECTION_CACHE: RefCell<Option<(EpsgCode, ExtendedTransverseMercatorProjection)>> = const { RefCell::new(None) };
 }
@@ -61,7 +60,6 @@ fn rectangular_to_lnglat(x: f64, y: f64, height: f64, input_epsg: EpsgCode) -> (
     PROJECTION_CACHE.with(|cache| {
         let mut cache = cache.borrow_mut();
 
-        // キャッシュに同じEPSGがあれば再利用
         let proj = if let Some((cached_epsg, ref cached_proj)) = *cache {
             if cached_epsg == input_epsg {
                 cached_proj
@@ -103,7 +101,7 @@ fn transform_from_jgd2011(
                 x: lng,
                 y: lat,
                 z: height,
-                color: point.color, // 所有権移動（cloneを避ける）
+                color: point.color,
                 attributes: point.attributes,
             }
         }
