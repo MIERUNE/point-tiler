@@ -76,11 +76,9 @@ For example, the following data is valid.
 
 ## Functions to be implemented
 
-- [ ] tiling using octree
 - [X] large-scale processing using streaming
 - [X] generation of gzip-compressed tiles
 - [ ] assignment of attributes using EXT_mesh_features
-- [ ] compression using meshopt
 - [ ] increasing the number of supported coordinate systems
 
 ## License
