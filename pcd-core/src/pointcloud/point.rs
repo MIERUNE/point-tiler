@@ -89,9 +89,6 @@ impl PointCloud {
             min: [f64::MAX, f64::MAX, f64::MAX],
             max: [f64::MIN, f64::MIN, f64::MIN],
         };
-        let mut digits_x = 1;
-        let mut digits_y = 1;
-        let mut digits_z = 1;
 
         let mut point_count = 0;
 
@@ -103,48 +100,25 @@ impl PointCloud {
             bounding_volume.min[1] = bounding_volume.min[1].min(point.y);
             bounding_volume.min[2] = bounding_volume.min[2].min(point.z);
 
-            for (value, digits) in [
-                (point.x, &mut digits_x),
-                (point.y, &mut digits_y),
-                (point.z, &mut digits_z),
-            ] {
-                let value_str = format!("{:.7}", value);
-                if let Some(dot_index) = value_str.find('.') {
-                    let fractional_part = &value_str[dot_index + 1..];
-                    let fractional_part = fractional_part.trim_end_matches('0');
-                    *digits = *digits.max(&mut fractional_part.len());
-                }
-            }
-
             point_count += 1;
         }
 
-        let max_digits = digits_x.max(digits_y).max(digits_z);
+        // Use fixed scale (7 decimal places precision)
+        // Note: scale is not currently used in GLB generation
+        let fixed_scale = 1e-7;
 
-        let scale_x: f64 = format!("{:.*}", max_digits, 0.1_f64.powi(max_digits as i32))
-            .parse()
-            .unwrap();
-        let scale_y: f64 = format!("{:.*}", max_digits, 0.1_f64.powi(max_digits as i32))
-            .parse()
-            .unwrap();
-        let scale_z: f64 = format!("{:.*}", max_digits, 0.1_f64.powi(max_digits as i32))
-            .parse()
-            .unwrap();
-
-        let min_x = bounding_volume.min[0];
-        let min_y = bounding_volume.min[1];
-        let min_z = bounding_volume.min[2];
-
-        let offset_x = min_x;
-        let offset_y = min_y;
-        let offset_z = min_z;
+        let offset = [
+            bounding_volume.min[0],
+            bounding_volume.min[1],
+            bounding_volume.min[2],
+        ];
 
         let metadata = Metadata {
             point_count,
             bounding_volume,
             epsg,
-            scale: [scale_x, scale_y, scale_z],
-            offset: [offset_x, offset_y, offset_z],
+            scale: [fixed_scale, fixed_scale, fixed_scale],
+            offset,
             other: HashMap::new(),
         };
 
