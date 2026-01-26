@@ -1,0 +1,15 @@
+[package]
+name = "proj-sys-transformer"
+version = "0.0.1"
+authors = ["MIERUNE Inc. <info@mierune.co.jp>"]
+edition = "2021"
+
+[dependencies]
+pcd-core = { path = "../pcd-core" }
+proj-sys = "0.27.0"
+
+[features]
+bundled-proj = ["proj-sys/bundled_proj"]
+
+[workspace]
+resolver = "2"
