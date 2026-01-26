@@ -11,6 +11,9 @@ pub type EpsgCode = u16;
 /// WGS84 Geographic 3D (EPSG:4979)
 pub const EPSG_WGS84_GEOGRAPHIC_3D: EpsgCode = 4979;
 
+/// WGS84 Geocentric / Earth-Centered Earth-Fixed (EPSG:4978)
+pub const EPSG_WGS84_GEOCENTRIC: EpsgCode = 4978;
+
 pub enum PointTransformer {
     Identity,
     Proj(ProjTransformer),

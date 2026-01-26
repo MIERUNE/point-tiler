@@ -27,7 +27,7 @@ use pcd_exporter::gltf::generate_glb;
 use pcd_parser::reader::csv::CsvPointReader;
 use pcd_parser::reader::las::LasPointReader;
 use pcd_parser::reader::PointReader;
-use coordinate_transformer::PointTransformer;
+use coordinate_transformer::{PointTransformer, EPSG_WGS84_GEOCENTRIC, EPSG_WGS84_GEOGRAPHIC_3D};
 use rayon::iter::{IntoParallelIterator as _, IntoParallelRefIterator as _, ParallelIterator as _};
 use tempfile::tempdir;
 use tinymvt::tileid::hilbert;
@@ -43,7 +43,6 @@ use pcd_exporter::{
     tiling::{geometric_error, TileContent, TileTree},
 };
 use pcd_parser::parser::{get_extension, Extension};
-use projection_transform::cartesian::geodetic_to_geocentric;
 
 #[derive(Parser, Debug, Clone)]
 #[command(
@@ -248,50 +247,41 @@ fn export_tiles_to_glb(
         all_tiles.extend(files);
     }
 
-    const PAR_TRANSFORM_THRESHOLD: usize = 200_000;
-
     let tile_contents: Vec<TileContent> = all_tiles
         .par_iter()
         .map(|tile_file| -> std::io::Result<TileContent> {
             let (tz, tx, ty) = extract_tile_coords(tile_file);
-            let points = read_points_from_tile(tile_file)?;
-            let epsg = 4979;
-            let pc = PointCloud::new(points, epsg);
+            let mut points = read_points_from_tile(tile_file)?;
+            let epsg = EPSG_WGS84_GEOGRAPHIC_3D;
+            let pc = PointCloud::new(points.clone(), epsg);
 
             let tile_content = make_tile_content(&(tz, tx, ty), &pc);
 
-            let ellipsoid = projection_transform::ellipsoid::wgs84();
-            let points = pc.points;
-            let transformed_points: Vec<Point> = if points.len() >= PAR_TRANSFORM_THRESHOLD {
-                points
-                    .into_par_iter()
-                    .map(|mut orig| {
-                        let (lng, lat, height) = (orig.x, orig.y, orig.z);
-                        let (xx, yy, zz) = geodetic_to_geocentric(&ellipsoid, lng, lat, height);
-                        orig.x = xx;
-                        orig.y = zz;
-                        orig.z = -yy;
-                        orig
-                    })
-                    .collect()
-            } else {
-                points
-                    .into_iter()
-                    .map(|mut orig| {
-                        let (lng, lat, height) = (orig.x, orig.y, orig.z);
-                        let (xx, yy, zz) = geodetic_to_geocentric(&ellipsoid, lng, lat, height);
-                        orig.x = xx;
-                        orig.y = zz;
-                        orig.z = -yy;
-                        orig
-                    })
-                    .collect()
-            };
+            // EPSG:4979 (Geographic 3D) → EPSG:4978 (Geocentric/ECEF) 変換
+            let mut geocentric_transformer =
+                PointTransformer::new(EPSG_WGS84_GEOGRAPHIC_3D, EPSG_WGS84_GEOCENTRIC, None)
+                    .map_err(|e| {
+                        std::io::Error::other(format!("Failed to create geocentric transformer: {e}"))
+                    })?;
+            geocentric_transformer
+                .transform_points_in_place(&mut points)
+                .map_err(|e| {
+                    std::io::Error::other(format!("Failed to transform to geocentric: {e}"))
+                })?;
+
+            // Cesium 用の座標軸入れ替え (PROJ変換後に実施)
+            // ECEF (X, Y, Z) → Cesium (X, Z, -Y)
+            for p in &mut points {
+                let (x, y, z) = (p.x, p.y, p.z);
+                p.x = x;
+                p.y = z;
+                p.z = -y;
+            }
 
             let geometric_error_value = geometric_error(tz, ty);
             let voxel_size = geometric_error_value * 0.1;
             let decimator = VoxelDecimator { voxel_size };
-            let decimated_points = decimator.decimate(&transformed_points);
+            let decimated_points = decimator.decimate(&points);
             let decimated = PointCloud::new(decimated_points, epsg);
 
             let glb_path = output_path.join(&tile_content.content_path);
