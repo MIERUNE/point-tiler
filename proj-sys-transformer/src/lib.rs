@@ -205,7 +205,7 @@ fn proj_error_from_pj(
 }
 
 fn proj_error_message(ctx: *mut proj::PJ_CONTEXT, code: i32) -> String {
-    let c_msg = unsafe { proj::proj_context_errno_string(ctx, code as i32) };
+    let c_msg = unsafe { proj::proj_context_errno_string(ctx, code) };
     if c_msg.is_null() {
         return "unknown error".to_string();
     }

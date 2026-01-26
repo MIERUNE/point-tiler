@@ -11,7 +11,7 @@ cesiumtiles-gltf-json = { path = "../cesiumtiles-gltf/cesiumtiles-gltf-json" }
 pcd-exporter = { path = "../pcd-exporter" }
 pcd-core = { path = "../pcd-core" }
 projection-transform = { path = "../projection-transform" }
-pcd-transformer = { path = "../pcd-transformer" }
+coordinate-transformer = { path = "../coordinate-transformer" }
 cesiumtiles = { git = "https://github.com/MIERUNE/cesiumtiles-rs.git" }
 rayon = "1.10.0"
 clap = { version = "4.5.20", features = ["derive", "string"] }

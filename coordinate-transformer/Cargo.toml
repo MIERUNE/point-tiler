@@ -13,6 +13,3 @@ bundled-proj = ["proj-sys-transformer/bundled-proj"]
 
 [dev-dependencies]
 criterion = "0.5"
-
-[workspace]
-resolver = "2"

@@ -3,7 +3,7 @@ use std::convert::Infallible;
 use std::ffi::OsStr;
 use std::fs::File;
 use std::io::{BufReader, BufWriter, Read as _, Write};
-use std::sync::{mpsc, Arc};
+use std::sync::mpsc;
 use std::thread;
 use std::{
     fs,
@@ -27,8 +27,7 @@ use pcd_exporter::gltf::generate_glb;
 use pcd_parser::reader::csv::CsvPointReader;
 use pcd_parser::reader::las::LasPointReader;
 use pcd_parser::reader::PointReader;
-use pcd_transformer::projection::transform_point;
-use projection_transform::vshift::Jgd2011ToWgs84;
+use coordinate_transformer::PointTransformer;
 use rayon::iter::{IntoParallelIterator as _, IntoParallelRefIterator as _, ParallelIterator as _};
 use tempfile::tempdir;
 use tinymvt::tileid::hilbert;
@@ -409,15 +408,16 @@ fn in_memory_workflow(
     args: &Cli,
     output_path: &Path,
 ) -> std::io::Result<()> {
-    let jgd2wgs = Arc::new(Jgd2011ToWgs84::default());
-
     let extension = check_and_get_extension(&input_files).unwrap();
 
     log::info!("start parse and transform and tiling...");
     let start_local = std::time::Instant::now();
 
+    let epsg_in = args.input_epsg;
+    let epsg_out = args.output_epsg;
+
     // 複数ファイルを並列に読み込む
-    let all_points: Vec<Point> = input_files
+    let mut all_points: Vec<Point> = input_files
         .par_iter()
         .flat_map(|file| {
             let mut reader: Box<dyn PointReader> = match extension {
@@ -437,6 +437,14 @@ fn in_memory_workflow(
         })
         .collect();
 
+    // 座標変換
+    let mut transformer = PointTransformer::new(epsg_in, epsg_out, None).map_err(|e| {
+        std::io::Error::other(format!("Failed to create transformer: {e}"))
+    })?;
+    transformer.transform_points_in_place(&mut all_points).map_err(|e| {
+        std::io::Error::other(format!("Failed to transform points: {e}"))
+    })?;
+
     log::info!(
         "Finish transforming and tiling in {:?}",
         start_local.elapsed()
@@ -444,17 +452,13 @@ fn in_memory_workflow(
 
     log::info!("start grouping...");
     let start_local = std::time::Instant::now();
-    let epsg_in = args.input_epsg;
-    let epsg_out = args.output_epsg;
     let max_zoom = args.max;
 
-    let jgd2wgs_clone = Arc::clone(&jgd2wgs);
     let map_init = || HashMap::<u64, Vec<Point>>::new();
-    let map_fold = move |mut map: HashMap<u64, Vec<Point>>, p: &Point| {
-        let transformed = transform_point(p.clone(), epsg_in, epsg_out, &jgd2wgs_clone);
-        let (z, x, y) = tiling::scheme::zxy_from_lng_lat(max_zoom, transformed.x, transformed.y);
+    let map_fold = |mut map: HashMap<u64, Vec<Point>>, p: Point| {
+        let (z, x, y) = tiling::scheme::zxy_from_lng_lat(max_zoom, p.x, p.y);
         let tile_id = TileIdMethod::Hilbert.zxy_to_id(z, x, y);
-        map.entry(tile_id).or_default().push(transformed);
+        map.entry(tile_id).or_default().push(p);
         map
     };
     let map_reduce = |mut a: HashMap<u64, Vec<Point>>, b: HashMap<u64, Vec<Point>>| {
@@ -465,7 +469,7 @@ fn in_memory_workflow(
     };
 
     let tile_map = all_points
-        .par_iter()
+        .into_par_iter()
         .fold(map_init, map_fold)
         .reduce(map_init, map_reduce);
 
@@ -553,7 +557,6 @@ fn external_sort_workflow(
 
     let start_local = std::time::Instant::now();
 
-    let jgd2wgs = Arc::new(Jgd2011ToWgs84::default());
     let tmp_run_file_dir_path = tempdir().unwrap();
 
     {
@@ -589,10 +592,13 @@ fn external_sort_workflow(
         for chunk in input_files.chunks(chunk_size) {
             let chunk = chunk.to_vec();
             let tx = tx.clone();
-            let jgd2wgs_clone = Arc::clone(&jgd2wgs);
             let extension_copy = extension;
 
             let handle = thread::spawn(move || {
+                // 各スレッドで独自のトランスフォーマーを作成
+                let mut transformer = PointTransformer::new(epsg_in, epsg_out, None)
+                    .expect("Failed to create transformer");
+
                 let mut buffer = Vec::with_capacity(default_chunk_points_len);
                 let mut reader: Box<dyn PointReader> = match extension_copy {
                     Extension::Las | Extension::Laz => {
@@ -604,9 +610,12 @@ fn external_sort_workflow(
                 };
 
                 while let Ok(Some(p)) = reader.next_point() {
-                    let transformed = transform_point(p, epsg_in, epsg_out, &jgd2wgs_clone);
-                    buffer.push(transformed);
+                    buffer.push(p);
                     if buffer.len() >= default_chunk_points_len {
+                        // バッチで座標変換
+                        transformer
+                            .transform_points_in_place(&mut buffer)
+                            .expect("Failed to transform points");
                         let to_send = std::mem::replace(
                             &mut buffer,
                             Vec::with_capacity(default_chunk_points_len),
@@ -617,6 +626,10 @@ fn external_sort_workflow(
                     }
                 }
                 if !buffer.is_empty() {
+                    // 残りの点を変換
+                    transformer
+                        .transform_points_in_place(&mut buffer)
+                        .expect("Failed to transform points");
                     let _ = tx.send(buffer);
                 }
             });
