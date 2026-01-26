@@ -2,7 +2,7 @@ use std::collections::HashMap;
 use std::convert::Infallible;
 use std::ffi::OsStr;
 use std::fs::File;
-use std::io::{BufWriter, Read as _, Write};
+use std::io::{BufReader, BufWriter, Read as _, Write};
 use std::sync::{mpsc, Arc};
 use std::thread;
 use std::{
@@ -75,6 +75,9 @@ struct Cli {
     #[arg(long, default_value_t = 4 * 1024)]
     max_memory_mb: usize,
 
+    #[arg(long, value_name = "N")]
+    threads: Option<usize>,
+
     #[arg(long)]
     quantize: bool,
 
@@ -141,10 +144,15 @@ fn write_points_to_tile(
 fn read_points_from_tile(file_path: &Path) -> std::io::Result<Vec<Point>> {
     let file = File::open(file_path)?;
     // let mut buf_reader = MgzipSyncReader::new(file);
-    let mut buf_reader = file;
+    let mut buf_reader = BufReader::new(file);
     let mut buffer = Vec::new();
-    buf_reader.read_to_end(&mut buffer).unwrap();
-    let points = bitcode::decode(&buffer).unwrap();
+    buf_reader.read_to_end(&mut buffer)?;
+    let points: Vec<Point> = bitcode::decode(&buffer).map_err(|e| {
+        std::io::Error::new(
+            std::io::ErrorKind::InvalidData,
+            format!("bitcode decode failed: {e}"),
+        )
+    })?;
     Ok(points)
 }
 
@@ -192,21 +200,30 @@ fn aggregate_zoom_level(base_path: &Path, z: u8) -> std::io::Result<()> {
     let child_z = z + 1;
     let child_files = get_tile_list_for_zoom(base_path, child_z);
 
-    let mut parent_map: HashMap<(u8, u32, u32), Vec<Point>> = HashMap::new();
+    let parent_map: HashMap<(u8, u32, u32), Vec<Point>> = child_files
+        .par_iter()
+        .try_fold(
+            HashMap::<(u8, u32, u32), Vec<Point>>::new,
+            |mut map, child_file| -> std::io::Result<_> {
+                let (cz, cx, cy) = extract_tile_coords(child_file);
+                debug_assert_eq!(cz, child_z);
 
-    for child_file in child_files {
-        let (cz, cx, cy) = extract_tile_coords(&child_file);
-        assert_eq!(cz, child_z);
+                let parent_coords = (z, cx / 2, cy / 2);
+                let mut points = read_points_from_tile(child_file)?;
+                map.entry(parent_coords).or_default().append(&mut points);
 
-        let points = read_points_from_tile(&child_file)?;
-
-        for p in points {
-            let parent_x = cx / 2;
-            let parent_y = cy / 2;
-            let parent_coords = (z, parent_x, parent_y);
-            parent_map.entry(parent_coords).or_default().push(p);
-        }
-    }
+                Ok(map)
+            },
+        )
+        .try_reduce(
+            HashMap::<(u8, u32, u32), Vec<Point>>::new,
+            |mut a, b| -> std::io::Result<_> {
+                for (k, mut v) in b {
+                    a.entry(k).or_default().append(&mut v);
+                }
+                Ok(a)
+            },
+        )?;
 
     parent_map
         .into_par_iter()
@@ -232,63 +249,77 @@ fn export_tiles_to_glb(
         all_tiles.extend(files);
     }
 
+    const PAR_TRANSFORM_THRESHOLD: usize = 200_000;
+
     let tile_contents: Vec<TileContent> = all_tiles
         .par_iter()
-        .map(|tile_file| {
+        .map(|tile_file| -> std::io::Result<TileContent> {
             let (tz, tx, ty) = extract_tile_coords(tile_file);
-            let points = read_points_from_tile(tile_file).unwrap();
+            let points = read_points_from_tile(tile_file)?;
             let epsg = 4979;
             let pc = PointCloud::new(points, epsg);
 
             let tile_content = make_tile_content(&(tz, tx, ty), &pc);
 
             let ellipsoid = projection_transform::ellipsoid::wgs84();
-            let transformed_points: Vec<Point> = pc
-                .points
-                .par_iter()
-                .map(|orig| {
-                    let (lng, lat, height) = (orig.x, orig.y, orig.z);
-                    let (xx, yy, zz) = geodetic_to_geocentric(&ellipsoid, lng, lat, height);
-                    Point {
-                        x: xx,
-                        y: zz,
-                        z: -yy,
-                        color: orig.color.clone(),
-                        attributes: orig.attributes.clone(),
-                    }
-                })
-                .collect();
+            let points = pc.points;
+            let transformed_points: Vec<Point> = if points.len() >= PAR_TRANSFORM_THRESHOLD {
+                points
+                    .into_par_iter()
+                    .map(|mut orig| {
+                        let (lng, lat, height) = (orig.x, orig.y, orig.z);
+                        let (xx, yy, zz) = geodetic_to_geocentric(&ellipsoid, lng, lat, height);
+                        orig.x = xx;
+                        orig.y = zz;
+                        orig.z = -yy;
+                        orig
+                    })
+                    .collect()
+            } else {
+                points
+                    .into_iter()
+                    .map(|mut orig| {
+                        let (lng, lat, height) = (orig.x, orig.y, orig.z);
+                        let (xx, yy, zz) = geodetic_to_geocentric(&ellipsoid, lng, lat, height);
+                        orig.x = xx;
+                        orig.y = zz;
+                        orig.z = -yy;
+                        orig
+                    })
+                    .collect()
+            };
 
-            let transformed_pc = PointCloud::new(transformed_points, epsg);
             let geometric_error_value = geometric_error(tz, ty);
             let voxel_size = geometric_error_value * 0.1;
             let decimator = VoxelDecimator { voxel_size };
-            let decimated_points = decimator.decimate(&transformed_pc.points);
+            let decimated_points = decimator.decimate(&transformed_points);
             let decimated = PointCloud::new(decimated_points, epsg);
 
             let glb_path = output_path.join(&tile_content.content_path);
-            fs::create_dir_all(glb_path.parent().unwrap()).unwrap();
+            fs::create_dir_all(glb_path.parent().unwrap())?;
 
             let glb = if quantize {
-                generate_quantized_glb(decimated).unwrap()
+                generate_quantized_glb(decimated)
+                    .map_err(|e| std::io::Error::other(format!("glb generation failed: {e}")))?
             } else {
-                generate_glb(decimated).unwrap()
+                generate_glb(decimated)
+                    .map_err(|e| std::io::Error::other(format!("glb generation failed: {e}")))?
             };
 
             if gzip_compress {
-                let file = File::create(glb_path).unwrap();
+                let file = File::create(glb_path)?;
                 // let writer: ParCompress<Mgzip> = ParCompressBuilder::new().from_writer(file);
                 let writer = BufWriter::new(file);
-                glb.to_writer_with_alignment(writer, 8).unwrap();
+                glb.to_writer_with_alignment(writer, 8)?;
             } else {
-                let file = File::create(glb_path).unwrap();
+                let file = File::create(glb_path)?;
                 let writer = BufWriter::new(file);
-                glb.to_writer_with_alignment(writer, 8).unwrap();
+                glb.to_writer_with_alignment(writer, 8)?;
             }
 
-            tile_content
+            Ok(tile_content)
         })
-        .collect();
+        .collect::<std::io::Result<Vec<_>>>()?;
 
     Ok(tile_contents)
 }
@@ -745,12 +776,6 @@ fn external_sort_workflow(
 }
 
 fn main() -> std::io::Result<()> {
-    // Rayonのグローバルスレッドプールを設定
-    rayon::ThreadPoolBuilder::new()
-        .num_threads(num_cpus::get() * 2)
-        .build_global()
-        .unwrap();
-
     Builder::new()
         .format(|buf, record| {
             writeln!(
@@ -766,6 +791,16 @@ fn main() -> std::io::Result<()> {
 
     let args = Cli::parse();
 
+    let thread_count = args
+        .threads
+        .filter(|&n| n > 0)
+        .unwrap_or(num_cpus::get() * 2);
+    rayon::ThreadPoolBuilder::new()
+        .num_threads(thread_count)
+        .build_global()
+        .unwrap();
+
+    log::info!("rayon threads: {}", thread_count);
     log::info!("input files: {:?}", args.input);
     log::info!("output folder: {}", args.output);
     log::info!("input EPSG: {}", args.input_epsg);
@@ -773,6 +808,7 @@ fn main() -> std::io::Result<()> {
     log::info!("min zoom: {}", args.min);
     log::info!("max zoom: {}", args.max);
     log::info!("max memory mb: {}", args.max_memory_mb);
+    log::info!("threads: {:?}", args.threads);
     log::info!("quantize: {}", args.quantize);
     log::info!("gzip compress: {}", args.gzip_compress);
 

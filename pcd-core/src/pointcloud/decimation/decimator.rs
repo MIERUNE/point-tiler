@@ -1,4 +1,4 @@
-use std::collections::HashMap;
+use std::collections::{hash_map::Entry, HashMap};
 
 use crate::pointcloud::point::Point;
 
@@ -13,21 +13,30 @@ pub struct VoxelDecimator {
 impl PointCloudDecimator for VoxelDecimator {
     fn decimate(&self, points: &[Point]) -> Vec<Point> {
         let voxel_size = self.voxel_size;
-        let mut cells: HashMap<(i64, i64, i64), Vec<&Point>> = HashMap::new();
+        let mut best_points: HashMap<(i64, i64, i64), (f64, &Point)> = HashMap::new();
 
         for point in points {
             let index = self.get_voxel_index(point, voxel_size);
-            cells.entry(index).or_default().push(point);
-        }
-
-        let mut decimated_points = Vec::new();
-        for (index, cell_points) in cells {
             let voxel_center = self.get_voxel_center(index, voxel_size);
-            let closest_point = self.select_closest_point(cell_points, voxel_center);
-            decimated_points.push(closest_point.clone());
+            let dist = self.squared_distance(point, voxel_center);
+
+            match best_points.entry(index) {
+                Entry::Vacant(e) => {
+                    e.insert((dist, point));
+                }
+                Entry::Occupied(mut e) => {
+                    let (best_dist, _) = *e.get();
+                    if dist < best_dist {
+                        e.insert((dist, point));
+                    }
+                }
+            }
         }
 
-        decimated_points
+        best_points
+            .into_values()
+            .map(|(_, point)| point.clone())
+            .collect()
     }
 }
 
@@ -46,23 +55,6 @@ impl VoxelDecimator {
             (y_idx as f64 + 0.5) * voxel_size,
             (z_idx as f64 + 0.5) * voxel_size,
         )
-    }
-
-    fn select_closest_point<'a>(
-        &self,
-        points: Vec<&'a Point>,
-        voxel_center: (f64, f64, f64),
-    ) -> &'a Point {
-        points
-            .into_iter()
-            .min_by(|a, b| {
-                let dist_a = self.squared_distance(a, voxel_center);
-                let dist_b = self.squared_distance(b, voxel_center);
-                dist_a
-                    .partial_cmp(&dist_b)
-                    .unwrap_or(std::cmp::Ordering::Equal)
-            })
-            .unwrap()
     }
 
     fn squared_distance(&self, a: &Point, b: (f64, f64, f64)) -> f64 {
