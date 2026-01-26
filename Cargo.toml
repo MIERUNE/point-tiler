@@ -6,7 +6,6 @@ members = [
     "pcd-exporter",
     "cesiumtiles-gltf",
     "coordinate-transformer",
-    "proj-sys-transformer",
 ]
 resolver = "2"
 

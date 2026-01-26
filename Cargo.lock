@@ -372,7 +372,7 @@ version = "0.0.1"
 dependencies = [
  "criterion",
  "pcd-core",
- "proj-sys-transformer",
+ "proj-sys",
 ]
 
 [[package]]
@@ -1175,14 +1175,6 @@ dependencies = [
  "link-cplusplus",
  "pkg-config",
  "tar",
-]
-
-[[package]]
-name = "proj-sys-transformer"
-version = "0.0.1"
-dependencies = [
- "pcd-core",
- "proj-sys",
 ]
 
 [[package]]

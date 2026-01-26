@@ -1,24 +1,18 @@
-use std::fmt;
-
-use proj_sys_transformer::ProjError;
-
 #[derive(Debug)]
-pub enum ProjectionError {
-    Proj(ProjError),
+pub struct ProjError {
+    pub code: i32,
+    pub message: String,
+    pub context: &'static str,
 }
 
-impl fmt::Display for ProjectionError {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        match self {
-            Self::Proj(e) => write!(f, "{e}"),
-        }
+impl std::fmt::Display for ProjError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(
+            f,
+            "PROJ error ({}): {} {}",
+            self.context, self.code, self.message
+        )
     }
 }
 
-impl std::error::Error for ProjectionError {}
-
-impl From<ProjError> for ProjectionError {
-    fn from(value: ProjError) -> Self {
-        Self::Proj(value)
-    }
-}
+impl std::error::Error for ProjError {}
