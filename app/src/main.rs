@@ -2,8 +2,8 @@ use std::collections::HashMap;
 use std::convert::Infallible;
 use std::ffi::OsStr;
 use std::fs::File;
-use std::io::{BufWriter, Read as _, Write};
-use std::sync::{mpsc, Arc};
+use std::io::{BufReader, BufWriter, Read as _, Write};
+use std::sync::mpsc;
 use std::thread;
 use std::{
     fs,
@@ -21,14 +21,13 @@ use glob::glob;
 //     deflate::Mgzip,
 //     par::compress::{ParCompress, ParCompressBuilder},
 // };
+use coordinate_transformer::{PointTransformer, EPSG_WGS84_GEOCENTRIC, EPSG_WGS84_GEOGRAPHIC_3D};
 use itertools::Itertools as _;
 use log::LevelFilter;
 use pcd_exporter::gltf::generate_glb;
 use pcd_parser::reader::csv::CsvPointReader;
 use pcd_parser::reader::las::LasPointReader;
 use pcd_parser::reader::PointReader;
-use pcd_transformer::projection::transform_point;
-use projection_transform::vshift::Jgd2011ToWgs84;
 use rayon::iter::{IntoParallelIterator as _, IntoParallelRefIterator as _, ParallelIterator as _};
 use tempfile::tempdir;
 use tinymvt::tileid::hilbert;
@@ -44,7 +43,6 @@ use pcd_exporter::{
     tiling::{geometric_error, TileContent, TileTree},
 };
 use pcd_parser::parser::{get_extension, Extension};
-use projection_transform::cartesian::geodetic_to_geocentric;
 
 #[derive(Parser, Debug, Clone)]
 #[command(
@@ -74,6 +72,9 @@ struct Cli {
 
     #[arg(long, default_value_t = 4 * 1024)]
     max_memory_mb: usize,
+
+    #[arg(long, value_name = "N")]
+    threads: Option<usize>,
 
     #[arg(long)]
     quantize: bool,
@@ -141,10 +142,15 @@ fn write_points_to_tile(
 fn read_points_from_tile(file_path: &Path) -> std::io::Result<Vec<Point>> {
     let file = File::open(file_path)?;
     // let mut buf_reader = MgzipSyncReader::new(file);
-    let mut buf_reader = file;
+    let mut buf_reader = BufReader::new(file);
     let mut buffer = Vec::new();
-    buf_reader.read_to_end(&mut buffer).unwrap();
-    let points = bitcode::decode(&buffer).unwrap();
+    buf_reader.read_to_end(&mut buffer)?;
+    let points: Vec<Point> = bitcode::decode(&buffer).map_err(|e| {
+        std::io::Error::new(
+            std::io::ErrorKind::InvalidData,
+            format!("bitcode decode failed: {e}"),
+        )
+    })?;
     Ok(points)
 }
 
@@ -192,21 +198,30 @@ fn aggregate_zoom_level(base_path: &Path, z: u8) -> std::io::Result<()> {
     let child_z = z + 1;
     let child_files = get_tile_list_for_zoom(base_path, child_z);
 
-    let mut parent_map: HashMap<(u8, u32, u32), Vec<Point>> = HashMap::new();
+    let parent_map: HashMap<(u8, u32, u32), Vec<Point>> = child_files
+        .par_iter()
+        .try_fold(
+            HashMap::<(u8, u32, u32), Vec<Point>>::new,
+            |mut map, child_file| -> std::io::Result<_> {
+                let (cz, cx, cy) = extract_tile_coords(child_file);
+                debug_assert_eq!(cz, child_z);
 
-    for child_file in child_files {
-        let (cz, cx, cy) = extract_tile_coords(&child_file);
-        assert_eq!(cz, child_z);
+                let parent_coords = (z, cx / 2, cy / 2);
+                let mut points = read_points_from_tile(child_file)?;
+                map.entry(parent_coords).or_default().append(&mut points);
 
-        let points = read_points_from_tile(&child_file)?;
-
-        for p in points {
-            let parent_x = cx / 2;
-            let parent_y = cy / 2;
-            let parent_coords = (z, parent_x, parent_y);
-            parent_map.entry(parent_coords).or_default().push(p);
-        }
-    }
+                Ok(map)
+            },
+        )
+        .try_reduce(
+            HashMap::<(u8, u32, u32), Vec<Point>>::new,
+            |mut a, b| -> std::io::Result<_> {
+                for (k, mut v) in b {
+                    a.entry(k).or_default().append(&mut v);
+                }
+                Ok(a)
+            },
+        )?;
 
     parent_map
         .into_par_iter()
@@ -234,61 +249,68 @@ fn export_tiles_to_glb(
 
     let tile_contents: Vec<TileContent> = all_tiles
         .par_iter()
-        .map(|tile_file| {
+        .map(|tile_file| -> std::io::Result<TileContent> {
             let (tz, tx, ty) = extract_tile_coords(tile_file);
-            let points = read_points_from_tile(tile_file).unwrap();
-            let epsg = 4979;
-            let pc = PointCloud::new(points, epsg);
+            let mut points = read_points_from_tile(tile_file)?;
+            let epsg = EPSG_WGS84_GEOGRAPHIC_3D;
+            let pc = PointCloud::new(points.clone(), epsg);
 
             let tile_content = make_tile_content(&(tz, tx, ty), &pc);
 
-            let ellipsoid = projection_transform::ellipsoid::wgs84();
-            let transformed_points: Vec<Point> = pc
-                .points
-                .par_iter()
-                .map(|orig| {
-                    let (lng, lat, height) = (orig.x, orig.y, orig.z);
-                    let (xx, yy, zz) = geodetic_to_geocentric(&ellipsoid, lng, lat, height);
-                    Point {
-                        x: xx,
-                        y: zz,
-                        z: -yy,
-                        color: orig.color.clone(),
-                        attributes: orig.attributes.clone(),
-                    }
-                })
-                .collect();
+            // EPSG:4979 (Geographic 3D) → EPSG:4978 (Geocentric/ECEF) 変換
+            let mut geocentric_transformer =
+                PointTransformer::new(EPSG_WGS84_GEOGRAPHIC_3D, EPSG_WGS84_GEOCENTRIC, None)
+                    .map_err(|e| {
+                        std::io::Error::other(format!(
+                            "Failed to create geocentric transformer: {e}"
+                        ))
+                    })?;
+            geocentric_transformer
+                .transform_points_in_place(&mut points)
+                .map_err(|e| {
+                    std::io::Error::other(format!("Failed to transform to geocentric: {e}"))
+                })?;
 
-            let transformed_pc = PointCloud::new(transformed_points, epsg);
+            // Cesium 用の座標軸入れ替え (PROJ変換後に実施)
+            // ECEF (X, Y, Z) → Cesium (X, Z, -Y)
+            for p in &mut points {
+                let (x, y, z) = (p.x, p.y, p.z);
+                p.x = x;
+                p.y = z;
+                p.z = -y;
+            }
+
             let geometric_error_value = geometric_error(tz, ty);
             let voxel_size = geometric_error_value * 0.1;
             let decimator = VoxelDecimator { voxel_size };
-            let decimated_points = decimator.decimate(&transformed_pc.points);
+            let decimated_points = decimator.decimate(&points);
             let decimated = PointCloud::new(decimated_points, epsg);
 
             let glb_path = output_path.join(&tile_content.content_path);
-            fs::create_dir_all(glb_path.parent().unwrap()).unwrap();
+            fs::create_dir_all(glb_path.parent().unwrap())?;
 
             let glb = if quantize {
-                generate_quantized_glb(decimated).unwrap()
+                generate_quantized_glb(decimated)
+                    .map_err(|e| std::io::Error::other(format!("glb generation failed: {e}")))?
             } else {
-                generate_glb(decimated).unwrap()
+                generate_glb(decimated)
+                    .map_err(|e| std::io::Error::other(format!("glb generation failed: {e}")))?
             };
 
             if gzip_compress {
-                let file = File::create(glb_path).unwrap();
+                let file = File::create(glb_path)?;
                 // let writer: ParCompress<Mgzip> = ParCompressBuilder::new().from_writer(file);
                 let writer = BufWriter::new(file);
-                glb.to_writer_with_alignment(writer, 8).unwrap();
+                glb.to_writer_with_alignment(writer, 8)?;
             } else {
-                let file = File::create(glb_path).unwrap();
+                let file = File::create(glb_path)?;
                 let writer = BufWriter::new(file);
-                glb.to_writer_with_alignment(writer, 8).unwrap();
+                glb.to_writer_with_alignment(writer, 8)?;
             }
 
-            tile_content
+            Ok(tile_content)
         })
-        .collect();
+        .collect::<std::io::Result<Vec<_>>>()?;
 
     Ok(tile_contents)
 }
@@ -378,15 +400,16 @@ fn in_memory_workflow(
     args: &Cli,
     output_path: &Path,
 ) -> std::io::Result<()> {
-    let jgd2wgs = Arc::new(Jgd2011ToWgs84::default());
-
     let extension = check_and_get_extension(&input_files).unwrap();
 
     log::info!("start parse and transform and tiling...");
     let start_local = std::time::Instant::now();
 
+    let epsg_in = args.input_epsg;
+    let epsg_out = args.output_epsg;
+
     // 複数ファイルを並列に読み込む
-    let all_points: Vec<Point> = input_files
+    let mut all_points: Vec<Point> = input_files
         .par_iter()
         .flat_map(|file| {
             let mut reader: Box<dyn PointReader> = match extension {
@@ -406,6 +429,13 @@ fn in_memory_workflow(
         })
         .collect();
 
+    // 座標変換
+    let mut transformer = PointTransformer::new(epsg_in, epsg_out, None)
+        .map_err(|e| std::io::Error::other(format!("Failed to create transformer: {e}")))?;
+    transformer
+        .transform_points_in_place(&mut all_points)
+        .map_err(|e| std::io::Error::other(format!("Failed to transform points: {e}")))?;
+
     log::info!(
         "Finish transforming and tiling in {:?}",
         start_local.elapsed()
@@ -413,17 +443,13 @@ fn in_memory_workflow(
 
     log::info!("start grouping...");
     let start_local = std::time::Instant::now();
-    let epsg_in = args.input_epsg;
-    let epsg_out = args.output_epsg;
     let max_zoom = args.max;
 
-    let jgd2wgs_clone = Arc::clone(&jgd2wgs);
     let map_init = || HashMap::<u64, Vec<Point>>::new();
-    let map_fold = move |mut map: HashMap<u64, Vec<Point>>, p: &Point| {
-        let transformed = transform_point(p.clone(), epsg_in, epsg_out, &jgd2wgs_clone);
-        let (z, x, y) = tiling::scheme::zxy_from_lng_lat(max_zoom, transformed.x, transformed.y);
+    let map_fold = |mut map: HashMap<u64, Vec<Point>>, p: Point| {
+        let (z, x, y) = tiling::scheme::zxy_from_lng_lat(max_zoom, p.x, p.y);
         let tile_id = TileIdMethod::Hilbert.zxy_to_id(z, x, y);
-        map.entry(tile_id).or_default().push(transformed);
+        map.entry(tile_id).or_default().push(p);
         map
     };
     let map_reduce = |mut a: HashMap<u64, Vec<Point>>, b: HashMap<u64, Vec<Point>>| {
@@ -434,7 +460,7 @@ fn in_memory_workflow(
     };
 
     let tile_map = all_points
-        .par_iter()
+        .into_par_iter()
         .fold(map_init, map_fold)
         .reduce(map_init, map_reduce);
 
@@ -522,7 +548,6 @@ fn external_sort_workflow(
 
     let start_local = std::time::Instant::now();
 
-    let jgd2wgs = Arc::new(Jgd2011ToWgs84::default());
     let tmp_run_file_dir_path = tempdir().unwrap();
 
     {
@@ -558,10 +583,13 @@ fn external_sort_workflow(
         for chunk in input_files.chunks(chunk_size) {
             let chunk = chunk.to_vec();
             let tx = tx.clone();
-            let jgd2wgs_clone = Arc::clone(&jgd2wgs);
             let extension_copy = extension;
 
             let handle = thread::spawn(move || {
+                // 各スレッドで独自のトランスフォーマーを作成
+                let mut transformer = PointTransformer::new(epsg_in, epsg_out, None)
+                    .expect("Failed to create transformer");
+
                 let mut buffer = Vec::with_capacity(default_chunk_points_len);
                 let mut reader: Box<dyn PointReader> = match extension_copy {
                     Extension::Las | Extension::Laz => {
@@ -573,9 +601,12 @@ fn external_sort_workflow(
                 };
 
                 while let Ok(Some(p)) = reader.next_point() {
-                    let transformed = transform_point(p, epsg_in, epsg_out, &jgd2wgs_clone);
-                    buffer.push(transformed);
+                    buffer.push(p);
                     if buffer.len() >= default_chunk_points_len {
+                        // バッチで座標変換
+                        transformer
+                            .transform_points_in_place(&mut buffer)
+                            .expect("Failed to transform points");
                         let to_send = std::mem::replace(
                             &mut buffer,
                             Vec::with_capacity(default_chunk_points_len),
@@ -586,6 +617,10 @@ fn external_sort_workflow(
                     }
                 }
                 if !buffer.is_empty() {
+                    // 残りの点を変換
+                    transformer
+                        .transform_points_in_place(&mut buffer)
+                        .expect("Failed to transform points");
                     let _ = tx.send(buffer);
                 }
             });
@@ -745,12 +780,6 @@ fn external_sort_workflow(
 }
 
 fn main() -> std::io::Result<()> {
-    // Rayonのグローバルスレッドプールを設定
-    rayon::ThreadPoolBuilder::new()
-        .num_threads(num_cpus::get() * 2)
-        .build_global()
-        .unwrap();
-
     Builder::new()
         .format(|buf, record| {
             writeln!(
@@ -766,6 +795,16 @@ fn main() -> std::io::Result<()> {
 
     let args = Cli::parse();
 
+    let thread_count = args
+        .threads
+        .filter(|&n| n > 0)
+        .unwrap_or(num_cpus::get() * 2);
+    rayon::ThreadPoolBuilder::new()
+        .num_threads(thread_count)
+        .build_global()
+        .unwrap();
+
+    log::info!("rayon threads: {}", thread_count);
     log::info!("input files: {:?}", args.input);
     log::info!("output folder: {}", args.output);
     log::info!("input EPSG: {}", args.input_epsg);
@@ -773,6 +812,7 @@ fn main() -> std::io::Result<()> {
     log::info!("min zoom: {}", args.min);
     log::info!("max zoom: {}", args.max);
     log::info!("max memory mb: {}", args.max_memory_mb);
+    log::info!("threads: {:?}", args.threads);
     log::info!("quantize: {}", args.quantize);
     log::info!("gzip compress: {}", args.gzip_compress);
 

@@ -1,7 +1,9 @@
 use std::collections::HashMap;
 
 use bitcode::{Decode, Encode};
-use projection_transform::crs::EpsgCode;
+
+/// EPSG code type alias
+pub type EpsgCode = u16;
 
 #[derive(Debug, Clone, Decode, Encode)]
 pub struct PointAttributes {

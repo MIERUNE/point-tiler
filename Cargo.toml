@@ -1,9 +1,12 @@
 [workspace]
 members = [
     "app",
-    "pcd-*",
+    "pcd-core",
+    "pcd-parser",
+    "pcd-exporter",
     "cesiumtiles-gltf",
-    "projection-transform",
+    "coordinate-transformer",
+    "proj-sys-transformer",
 ]
 resolver = "2"
 

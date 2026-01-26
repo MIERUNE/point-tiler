@@ -2,8 +2,7 @@ use std::{collections::HashMap, error::Error, path::PathBuf};
 
 use csv::ReaderBuilder;
 
-use pcd_core::pointcloud::point::{Color, Point, PointAttributes, PointCloud};
-use projection_transform::crs::EpsgCode;
+use pcd_core::pointcloud::point::{Color, EpsgCode, Point, PointAttributes, PointCloud};
 
 use super::{Parser, ParserProvider};
 

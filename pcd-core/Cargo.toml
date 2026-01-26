@@ -5,5 +5,4 @@ edition = "2021"
 
 [dependencies]
 bitcode = "0.6.3"
-projection-transform = { path = "../projection-transform" }
 serde = "1.0.215"
