@@ -21,13 +21,13 @@ use glob::glob;
 //     deflate::Mgzip,
 //     par::compress::{ParCompress, ParCompressBuilder},
 // };
+use coordinate_transformer::{PointTransformer, EPSG_WGS84_GEOCENTRIC, EPSG_WGS84_GEOGRAPHIC_3D};
 use itertools::Itertools as _;
 use log::LevelFilter;
 use pcd_exporter::gltf::generate_glb;
 use pcd_parser::reader::csv::CsvPointReader;
 use pcd_parser::reader::las::LasPointReader;
 use pcd_parser::reader::PointReader;
-use coordinate_transformer::{PointTransformer, EPSG_WGS84_GEOCENTRIC, EPSG_WGS84_GEOGRAPHIC_3D};
 use rayon::iter::{IntoParallelIterator as _, IntoParallelRefIterator as _, ParallelIterator as _};
 use tempfile::tempdir;
 use tinymvt::tileid::hilbert;
@@ -261,7 +261,9 @@ fn export_tiles_to_glb(
             let mut geocentric_transformer =
                 PointTransformer::new(EPSG_WGS84_GEOGRAPHIC_3D, EPSG_WGS84_GEOCENTRIC, None)
                     .map_err(|e| {
-                        std::io::Error::other(format!("Failed to create geocentric transformer: {e}"))
+                        std::io::Error::other(format!(
+                            "Failed to create geocentric transformer: {e}"
+                        ))
                     })?;
             geocentric_transformer
                 .transform_points_in_place(&mut points)
@@ -428,12 +430,11 @@ fn in_memory_workflow(
         .collect();
 
     // 座標変換
-    let mut transformer = PointTransformer::new(epsg_in, epsg_out, None).map_err(|e| {
-        std::io::Error::other(format!("Failed to create transformer: {e}"))
-    })?;
-    transformer.transform_points_in_place(&mut all_points).map_err(|e| {
-        std::io::Error::other(format!("Failed to transform points: {e}"))
-    })?;
+    let mut transformer = PointTransformer::new(epsg_in, epsg_out, None)
+        .map_err(|e| std::io::Error::other(format!("Failed to create transformer: {e}")))?;
+    transformer
+        .transform_points_in_place(&mut all_points)
+        .map_err(|e| std::io::Error::other(format!("Failed to transform points: {e}")))?;
 
     log::info!(
         "Finish transforming and tiling in {:?}",
