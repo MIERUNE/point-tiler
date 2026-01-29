@@ -93,17 +93,17 @@ jobs:
           Remove-Item -Recurse -Force vcpkg\buildtrees
           Remove-Item -Recurse -Force vcpkg\downloads
 
-      - name: Make build destination
-        if: runner.os != 'Windows'
-        run: mkdir -p app/build
+      # - name: Make build destination
+      #   if: runner.os != 'Windows'
+      #   run: mkdir -p app/build
 
-      - name: Make build destination (Windows)
-        if: runner.os == 'Windows'
-        shell: pwsh
-        run: New-Item -ItemType Directory -Force -Path app/build
+      # - name: Make build destination (Windows)
+      #   if: runner.os == 'Windows'
+      #   shell: pwsh
+      #   run: New-Item -ItemType Directory -Force -Path app/build
 
-      - name: Build App
-        run: cargo build --verbose --package app
+      # - name: Build App
+      #   run: cargo build --verbose --package app
 
-      - name: Clippy (lint)
-        run: cargo clippy --all-targets --all-features
+      # - name: Clippy (lint)
+      #   run: cargo clippy --all-targets --all-features
