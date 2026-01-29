@@ -12,14 +12,13 @@ env:
   CARGO_TERM_COLOR: always
   # Make sure CI fails on all warnings, including Clippy lints
   RUSTFLAGS: "-Dwarnings"
+  # proj v9.7.1
+  VCPKG_REF: a763d6da0368f761f62a6badc2162a2f2de652c3
+  # Bump this to clear cache
+  CACHE_VERSION: v1
 
 permissions:
   contents: read
-
-env:
-  # proj v9.7.1
-  VCPKG_REF: a763d6da0368f761f62a6badc2162a2f2de652c3
-  CACHE_VERSION: v1
 
 jobs:
   build:
