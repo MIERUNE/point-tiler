@@ -73,6 +73,7 @@ jobs:
           echo "VCPKG_ROOT=$VCPKG_ROOT" >> $GITHUB_ENV
           echo "PATH=$VCPKG_ROOT:$PATH" >> $GITHUB_ENV
           echo "PKG_CONFIG_PATH=${VCPKG_ROOT}/installed/x64-windows/lib/pkgconfig/" >> $GITHUB_ENV
+        shell: bash
 
       - name: Cache vcpkg binaries
         id: cache-vcpkg
