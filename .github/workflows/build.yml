@@ -23,6 +23,9 @@ permissions:
 jobs:
   build:
     runs-on: ${{ matrix.config.os }}
+    defaults:
+      run:
+        shell: bash
     strategy:
       fail-fast: false
       matrix:
