@@ -15,7 +15,7 @@ env:
   # proj v9.7.1
   VCPKG_REF: a763d6da0368f761f62a6badc2162a2f2de652c3
   # Bump this to clear cache
-  CACHE_VERSION: v1
+  CACHE_VERSION: v2
 
 permissions:
   contents: read
