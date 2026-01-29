@@ -98,7 +98,11 @@ jobs:
         if: runner.os == 'Windows'
         uses: actions/cache@v5
         with:
-          path: vcpkg/packages
+          path: |
+            vcpkg/packages
+            vcpkg/downloads/tools/msys2/21caed2f81ec917b/mingw64
+            vcpkg/installed/x64-windows/lib/pkgconfig
+            vcpkg/installed/x64-windows/bin
           key: vcpkg-installed-${{ runner.os }}-${{ runner.arch }}-${{ env.VCPKG_REF }}-${{ env.CACHE_VERSION }}
 
       - name: Install vcpkg dependencies
