@@ -12,27 +12,56 @@ env:
   CARGO_TERM_COLOR: always
   # Make sure CI fails on all warnings, including Clippy lints
   RUSTFLAGS: "-Dwarnings"
+  # Bump this to clear cache
+  CACHE_VERSION: v1
 
 permissions:
   contents: read
 
 jobs:
   build:
-    runs-on: ubuntu-latest
+    runs-on: ${{ matrix.config.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        config:
+          - { os: macos-latest, target: aarch64-apple-darwin }
+          - { os: macos-15-intel, target: x86_64-apple-darwin }
+          - { os: ubuntu-latest, target: x86_64-unknown-linux-gnu }
+          # - { os: ubuntu-latest, target: x86_64-unknown-linux-musl }
+          - { os: windows-latest, target: x86_64-pc-windows-msvc }
     steps:
-      - uses: actions/checkout@v4
-      - name: Rustup
-        run: rustup toolchain install stable --profile minimal
+      - uses: actions/checkout@v6
+
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.config.target }}
+
       - name: Rust Cache
         uses: Swatinem/rust-cache@v2
-      - name: install dependencies
-        # if: matrix.platform == 'ubuntu-20.04'
+        with:
+          prefix-key: rust-${{ runner.os }}-${{ env.CACHE_VERSION }}
+
+      - name: Install dependencies (Linux)
+        if: runner.os == 'Linux'
         run: |
           sudo apt-get update
           sudo apt install -y libwebkit2gtk-4.1-dev libxdo-dev libssl-dev libayatana-appindicator3-dev librsvg2-dev
+
       - name: Make build destination
         run: mkdir -p app/build
+        shell: bash
+
       - name: Build App
+        if: runner.os != 'Windows'
         run: cargo build --verbose --package app
+
+      - name: Build App (Windows)
+        if: runner.os == 'Windows'
+        run: |
+          choco install -y sqlite
+          cargo build --features bundled-proj --verbose --package app
+
       - name: Clippy (lint)
+        if: runner.os == 'Linux' # Probably the linting results are the same on all OSes
         run: cargo clippy --all-targets --all-features
