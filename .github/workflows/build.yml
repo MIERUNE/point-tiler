@@ -31,7 +31,7 @@ jobs:
           - { os: macos-15-intel, target: x86_64-apple-darwin }
           - { os: ubuntu-latest, target: x86_64-unknown-linux-gnu }
           # - { os: ubuntu-latest, target: x86_64-unknown-linux-musl }
-          - { os: windows-latest, target: x86_64-pc-windows-msvc, vcpkg: true }
+          - { os: windows-latest, target: x86_64-pc-windows-msvc }
     steps:
       - uses: actions/checkout@v6
 
@@ -54,14 +54,14 @@ jobs:
 
       - name: Clone vcpkg
         uses: actions/checkout@v6
-        if: matrix.config.vcpkg
+        if: runner.os == 'Windows'
         with:
           repository: microsoft/vcpkg
           ref: ${{ env.VCPKG_REF }}
           path: vcpkg
 
       - name: Set up environment variables and bootstrap vcpkg
-        if: matrix.config.vcpkg
+        if: runner.os == 'Windows'
         shell: pwsh
         env:
           VCPKG_ROOT: ${{ github.workspace }}/vcpkg
@@ -79,14 +79,14 @@ jobs:
 
       - name: Cache vcpkg binaries
         id: cache-vcpkg
-        if: matrix.config.vcpkg
+        if: runner.os == 'Windows'
         uses: actions/cache@v5
         with:
           path: vcpkg/packages
           key: vcpkg-installed-${{ runner.os }}-${{ runner.arch }}-${{ env.VCPKG_REF }}-${{ env.CACHE_VERSION }}
 
       - name: Install vcpkg dependencies
-        if: matrix.config.vcpkg && steps.cache-vcpkg.outputs.cache-hit != 'true'
+        if: runner.os == 'Windows' && steps.cache-vcpkg.outputs.cache-hit != 'true'
         shell: pwsh
         run: |
           ./vcpkg/vcpkg.exe install proj
