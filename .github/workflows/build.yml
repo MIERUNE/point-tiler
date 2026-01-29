@@ -106,4 +106,5 @@ jobs:
         run: cargo build --verbose --package app
 
       - name: Clippy (lint)
+        if: runner.os == 'Linux'
         run: cargo clippy --all-targets --all-features
