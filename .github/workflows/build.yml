@@ -16,7 +16,7 @@ env:
   # cf. https://github.com/microsoft/vcpkg/commit/63bb67b3ec76131e6297104befb3afb1f6111bd8
   VCPKG_REF: 63bb67b3ec76131e6297104befb3afb1f6111bd8
   # Bump this to clear cache
-  CACHE_VERSION: v2
+  CACHE_VERSION: v3
 
 permissions:
   contents: read
@@ -100,9 +100,8 @@ jobs:
         with:
           path: |
             vcpkg/packages
+            vcpkg/installed
             vcpkg/downloads/tools/msys2/21caed2f81ec917b/mingw64
-            vcpkg/installed/x64-windows/lib/pkgconfig
-            vcpkg/installed/x64-windows/bin
           key: vcpkg-installed-${{ runner.os }}-${{ runner.arch }}-${{ env.VCPKG_REF }}-${{ env.CACHE_VERSION }}
 
       - name: Install vcpkg dependencies
@@ -110,8 +109,6 @@ jobs:
         shell: pwsh
         run: |
           ./vcpkg/vcpkg.exe install proj
-          # Clean up vcpkg buildtrees to save space
-          Remove-Item -Recurse -Force vcpkg/buildtrees
 
       - name: Make build destination
         if: runner.os != 'Windows'
