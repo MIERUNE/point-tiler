@@ -12,8 +12,9 @@ env:
   CARGO_TERM_COLOR: always
   # Make sure CI fails on all warnings, including Clippy lints
   RUSTFLAGS: "-Dwarnings"
-  # proj v9.7.1
-  VCPKG_REF: a763d6da0368f761f62a6badc2162a2f2de652c3
+  # proj v9.6.2 (At the time of writing, proj-sys aims for PROJ v9.6.x)
+  # cf. https://github.com/microsoft/vcpkg/commit/63bb67b3ec76131e6297104befb3afb1f6111bd8
+  VCPKG_REF: 63bb67b3ec76131e6297104befb3afb1f6111bd8
   # Bump this to clear cache
   CACHE_VERSION: v2
 
@@ -50,7 +51,16 @@ jobs:
           sudo apt-get update
           sudo apt install -y libwebkit2gtk-4.1-dev libxdo-dev libssl-dev libayatana-appindicator3-dev librsvg2-dev
 
-      # These setup is based on SedonaDB's one: https://github.com/apache/sedona-db/blob/e51f5a59c057639c91798cc509df3c92331ae563/.github/workflows/rust.yml#L69-L103
+      # We use vcpkg to install PROJ on Windows as well as having pkg-config available. As we can
+      # see, introducing vcpkg feels a bit overkill, but it seems this is the only established way.
+      # The current setup is based on SedonaDB's one (while this is not for Windows):
+      #   https://github.com/apache/sedona-db/blob/e51f5a59c057639c91798cc509df3c92331ae563/.github/workflows/rust.yml#L69-L103
+      #
+      # For reference, possible alternative ways are:
+      # - Use MSYS2 and install mingw-w64-ucrt-x86_64-proj (but this requires windows-gnu target
+      #   instead of windows-msvc).
+      # - Use proj-sys's bundled_proj feature. I feel this should work in theory because Windows GHA
+      #   runner has SQLite installed, but I couldn't find a way to make the build success.
 
       - name: Clone vcpkg
         uses: actions/checkout@v6
@@ -60,6 +70,12 @@ jobs:
           ref: ${{ env.VCPKG_REF }}
           path: vcpkg
 
+      # This is tricky; these envvars are set in order to make the pkg-config, which is in vcpkg's
+      # toolchain, available. In theory, we can rely on other pkg-config and make it recognize
+      # vcpkg's PROJ, but I've never succeeded to make it work...
+      #
+      # The hash (e.g. 21caed2f81ec917b) in the PATH might be different depending on the version of
+      # vcpkg. So, if we update VCPKG_REF, you might need to update the hash as well.
       - name: Set up environment variables and bootstrap vcpkg
         if: runner.os == 'Windows'
         shell: pwsh
@@ -72,8 +88,8 @@ jobs:
 
           @"
           VCPKG_ROOT=$env:VCPKG_ROOT
-          PATH=${env:VCPKG_ROOT}/downloads/tools/msys2/9272adbcaf19caef/mingw64/bin/;${env:VCPKG_ROOT}/installed/x64-windows/bin/;${env:PATH}
-          PKG_CONFIG_SYSROOT_DIR=${env:VCPKG_ROOT}/downloads/tools/msys2/9272adbcaf19caef/mingw64/
+          PATH=${env:VCPKG_ROOT}/downloads/tools/msys2/21caed2f81ec917b/mingw64/bin/;${env:VCPKG_ROOT}/installed/x64-windows/bin/;${env:PATH}
+          PKG_CONFIG_SYSROOT_DIR=${env:VCPKG_ROOT}/downloads/tools/msys2/21caed2f81ec917b/mingw64/
           PKG_CONFIG_PATH=${env:VCPKG_ROOT}/installed/x64-windows/lib/pkgconfig/
           "@ | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
 
