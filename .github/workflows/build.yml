@@ -126,5 +126,5 @@ jobs:
         run: cargo build --verbose --package app
 
       - name: Clippy (lint)
-        if: runner.os == 'Linux'
+        if: runner.os == 'Linux' # Probably the linting results are the same on all OSes
         run: cargo clippy --all-targets --all-features
