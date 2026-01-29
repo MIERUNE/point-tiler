@@ -16,23 +16,85 @@ env:
 permissions:
   contents: read
 
+env:
+  # proj v9.7.1
+  VCPKG_REF: a763d6da0368f761f62a6badc2162a2f2de652c3
+  CACHE_VERSION: v1
+
 jobs:
   build:
-    runs-on: ubuntu-latest
+    runs-on: ${{ matrix.job.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        job:
+          - { os: macos-latest, target: aarch64-apple-darwin }
+          - { os: macos-15-intel, target: x86_64-apple-darwin }
+          - { os: ubuntu-latest, target: x86_64-unknown-linux-gnu }
+          # - { os: ubuntu-latest, target: x86_64-unknown-linux-musl }
+          - { os: windows-latest, target: x86_64-pc-windows-msvc, vcpkg: true }
+
     steps:
-      - uses: actions/checkout@v4
-      - name: Rustup
-        run: rustup toolchain install stable --profile minimal
+      - uses: actions/checkout@v6
+
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.job.target }}
+
       - name: Rust Cache
         uses: Swatinem/rust-cache@v2
-      - name: install dependencies
-        # if: matrix.platform == 'ubuntu-20.04'
+        with:
+          prefix-key: rust-${{ runner.os }}-${{ env.CACHE_VERSION }}
+
+      - name: Install dependencies (Linux)
+        if: runner.os == 'Linux'
         run: |
           sudo apt-get update
           sudo apt install -y libwebkit2gtk-4.1-dev libxdo-dev libssl-dev libayatana-appindicator3-dev librsvg2-dev
+
+      # These setup is based on SedonaDB's one: https://github.com/apache/sedona-db/blob/e51f5a59c057639c91798cc509df3c92331ae563/.github/workflows/rust.yml#L69-L103
+
+      - name: Clone vcpkg
+        uses: actions/checkout@v6
+        if: matrix.config.vcpkg
+        with:
+          repository: microsoft/vcpkg
+          ref: ${{ env.VCPKG_REF }}
+          path: vcpkg
+
+      - name: Set up environment variables and bootstrap vcpkg
+        if: matrix.config.vcpkg
+        env:
+          VCPKG_ROOT: ${{ github.workspace }}/vcpkg
+        run: |
+          cd vcpkg
+          ./bootstrap-vcpkg.sh
+          cd ..
+
+          echo "VCPKG_ROOT=$VCPKG_ROOT" >> $GITHUB_ENV
+          echo "PATH=$VCPKG_ROOT:$PATH" >> $GITHUB_ENV
+          echo "PKG_CONFIG_PATH=${VCPKG_ROOT}/installed/x64-windows/lib/pkgconfig/" >> $GITHUB_ENV
+
+      - name: Cache vcpkg binaries
+        id: cache-vcpkg
+        uses: actions/cache@v5
+        with:
+          path: vcpkg/packages
+          key: vcpkg-installed-${{ runner.os }}-${{ runner.arch }}-${{ env.VCPKG_REF }}-${{ env.CACHE_VERSION }}
+
+      - name: Install vcpkg dependencies
+        if: steps.cache-vcpkg.outputs.cache-hit != 'true'
+        run: |
+          ./vcpkg/vcpkg install proj
+          # Clean up vcpkg buildtrees and downloads to save space
+          rm -rf vcpkg/buildtrees
+          rm -rf vcpkg/downloads
+
       - name: Make build destination
         run: mkdir -p app/build
+
       - name: Build App
         run: cargo build --verbose --package app
+
       - name: Clippy (lint)
         run: cargo clippy --all-targets --all-features
