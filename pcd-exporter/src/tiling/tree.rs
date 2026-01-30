@@ -13,6 +13,7 @@ pub struct TileContent {
     pub max_lat: f64,
     pub min_height: f64,
     pub max_height: f64,
+    pub translation: [f64; 3],
 }
 
 impl Default for TileContent {
@@ -26,6 +27,7 @@ impl Default for TileContent {
             max_lat: f64::MIN,
             min_height: f64::MAX,
             max_height: f64::MIN,
+            translation: [0.0; 3],
         }
     }
 }
@@ -94,14 +96,20 @@ impl Tile {
         }
     }
 
-    fn into_tileset_tile(mut self) -> tileset::Tile {
+    fn into_tileset_tile(mut self, parent_ecef: [f64; 3]) -> tileset::Tile {
         self.update_boundary();
+
+        let self_ecef = if !self.contents.is_empty() {
+            self.contents[0].translation
+        } else {
+            parent_ecef
+        };
 
         let children = {
             let children: Vec<_> = [self.child00, self.child01, self.child10, self.child11]
                 .into_iter()
                 .flatten()
-                .map(|child| child.into_tileset_tile())
+                .map(|child| child.into_tileset_tile(self_ecef))
                 .collect();
             if children.is_empty() {
                 None
@@ -134,6 +142,15 @@ impl Tile {
             }
         };
 
+        let rel = [
+            self_ecef[0] - parent_ecef[0],
+            self_ecef[1] - parent_ecef[1],
+            self_ecef[2] - parent_ecef[2],
+        ];
+        let transform = [
+            1.0, 0.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 0.0, 1.0, 0.0, rel[0], rel[1], rel[2], 1.0,
+        ];
+
         let (z, _, y) = self.zxy;
         tileset::Tile {
             geometric_error: geometric_error(z, y),
@@ -146,6 +163,7 @@ impl Tile {
                 self.min_height,
                 self.max_height,
             ]),
+            transform,
             content,
             contents,
             children,
@@ -179,7 +197,7 @@ impl Default for TileTree {
 
 impl TileTree {
     pub fn into_tileset_root(self) -> tileset::Tile {
-        self.root.into_tileset_tile()
+        self.root.into_tileset_tile([0.0, 0.0, 0.0])
     }
 
     pub fn add_content(&mut self, content: TileContent) {
