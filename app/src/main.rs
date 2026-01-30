@@ -255,9 +255,9 @@ fn export_tiles_to_glb(
             let epsg = EPSG_WGS84_GEOGRAPHIC_3D;
             let pc = PointCloud::new(points.clone(), epsg);
 
-            let tile_content = make_tile_content(&(tz, tx, ty), &pc);
+            let mut tile_content = make_tile_content(&(tz, tx, ty), &pc);
 
-            // EPSG:4979 (Geographic 3D) → EPSG:4978 (Geocentric/ECEF) 変換
+            // EPSG:4979 (Geographic 3D) → EPSG:4978 (Geocentric/ECEF)
             let mut geocentric_transformer =
                 PointTransformer::new(EPSG_WGS84_GEOGRAPHIC_3D, EPSG_WGS84_GEOCENTRIC, None)
                     .map_err(|e| {
@@ -271,14 +271,25 @@ fn export_tiles_to_glb(
                     std::io::Error::other(format!("Failed to transform to geocentric: {e}"))
                 })?;
 
-            // Cesium 用の座標軸入れ替え (PROJ変換後に実施)
-            // ECEF (X, Y, Z) → Cesium (X, Z, -Y)
+            // Compute ECEF bbox min (before axis swap)
+            let ecef_min = points.iter().fold([f64::MAX; 3], |mut acc, p| {
+                acc[0] = acc[0].min(p.x);
+                acc[1] = acc[1].min(p.y);
+                acc[2] = acc[2].min(p.z);
+                acc
+            });
+
+            // Subtract ECEF offset and swap axes for Cesium
+            // Local ECEF (X, Y, Z) → Cesium (X, Z, -Y)
             for p in &mut points {
-                let (x, y, z) = (p.x, p.y, p.z);
+                let (x, y, z) = (p.x - ecef_min[0], p.y - ecef_min[1], p.z - ecef_min[2]);
                 p.x = x;
                 p.y = z;
                 p.z = -y;
             }
+
+            // Store ECEF offset in TileContent (before axis swap)
+            tile_content.translation = ecef_min;
 
             let geometric_error_value = geometric_error(tz, ty);
             let voxel_size = geometric_error_value * 0.1;
@@ -408,7 +419,7 @@ fn in_memory_workflow(
     let epsg_in = args.input_epsg;
     let epsg_out = args.output_epsg;
 
-    // 複数ファイルを並列に読み込む
+    // Read multiple files in parallel
     let mut all_points: Vec<Point> = input_files
         .par_iter()
         .flat_map(|file| {
@@ -429,7 +440,7 @@ fn in_memory_workflow(
         })
         .collect();
 
-    // 座標変換
+    // Coordinate transformation
     let mut transformer = PointTransformer::new(epsg_in, epsg_out, None)
         .map_err(|e| std::io::Error::other(format!("Failed to create transformer: {e}")))?;
     transformer
@@ -561,7 +572,7 @@ fn external_sort_workflow(
             channel_capacity = 1;
         }
 
-        // CPUコア数を考慮したチャンネル容量の最適化
+        // Optimize channel capacity based on CPU core count
         let num_cores = num_cpus::get();
         channel_capacity = std::cmp::max(channel_capacity, num_cores * 2);
 
@@ -576,7 +587,7 @@ fn external_sort_workflow(
 
         let (tx, rx) = mpsc::sync_channel::<Vec<Point>>(channel_capacity);
 
-        // 複数のリーダースレッドを起動
+        // Spawn multiple reader threads
         let chunk_size = input_files.len().div_ceil(num_cores);
         let mut handles = vec![];
 
@@ -586,7 +597,7 @@ fn external_sort_workflow(
             let extension_copy = extension;
 
             let handle = thread::spawn(move || {
-                // 各スレッドで独自のトランスフォーマーを作成
+                // Create a transformer per thread
                 let mut transformer = PointTransformer::new(epsg_in, epsg_out, None)
                     .expect("Failed to create transformer");
 
@@ -603,7 +614,7 @@ fn external_sort_workflow(
                 while let Ok(Some(p)) = reader.next_point() {
                     buffer.push(p);
                     if buffer.len() >= default_chunk_points_len {
-                        // バッチで座標変換
+                        // Transform coordinates in batch
                         transformer
                             .transform_points_in_place(&mut buffer)
                             .expect("Failed to transform points");
@@ -617,7 +628,7 @@ fn external_sort_workflow(
                     }
                 }
                 if !buffer.is_empty() {
-                    // 残りの点を変換
+                    // Transform remaining points
                     transformer
                         .transform_points_in_place(&mut buffer)
                         .expect("Failed to transform points");
@@ -627,7 +638,7 @@ fn external_sort_workflow(
             handles.push(handle);
         }
 
-        // 送信側のチャンネルを閉じるためにdropする
+        // Drop the sender to close the channel
         drop(tx);
 
         for (current_run_index, chunk) in rx.into_iter().enumerate() {

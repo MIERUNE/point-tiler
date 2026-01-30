@@ -26,6 +26,7 @@ pub fn make_tile_content(tile_coord: &TileZXY, point_cloud: &PointCloud) -> Tile
         max_lat,
         min_height,
         max_height,
+        translation: [0.0; 3],
     }
 }
 
