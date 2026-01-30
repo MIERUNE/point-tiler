@@ -2,6 +2,10 @@ name: Release
 on:
   release:
     types: [published]
+  # TEMP: allow testing on arbitrary branches; remove before merging to main.
+  push:
+    branches:
+      - "**"
 
 env:
   # proj v9.6.2 (At the time of writing, proj-sys aims for PROJ v9.6.x)
@@ -108,12 +112,12 @@ jobs:
           mv ./target/${{ matrix.job.target }}/release/app${{ matrix.job.extension }} \
              ./target/${{ matrix.job.target }}/release/${{ env.PROJECT_NAME }}-${{ github.ref_name }}-${{ matrix.job.target }}${{ matrix.job.extension }}
 
-      - name: Upload artifact to release
-        uses: actions/upload-release-asset@v1
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        with:
-          upload_url: ${{ github.event.release.upload_url }}
-          asset_path: ./target/${{ matrix.job.target }}/release/${{ env.PROJECT_NAME }}-${{ github.ref_name }}-${{ matrix.job.target }}${{ matrix.job.extension }}
-          asset_name: ${{ env.PROJECT_NAME }}-${{ github.ref_name }}-${{ matrix.job.target }}${{ matrix.job.extension }}
-          asset_content_type: application/octet-stream
+      # - name: Upload artifact to release
+      #   uses: actions/upload-release-asset@v1
+      #   env:
+      #     GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      #   with:
+      #     upload_url: ${{ github.event.release.upload_url }}
+      #     asset_path: ./target/${{ matrix.job.target }}/release/${{ env.PROJECT_NAME }}-${{ github.ref_name }}-${{ matrix.job.target }}${{ matrix.job.extension }}
+      #     asset_name: ${{ env.PROJECT_NAME }}-${{ github.ref_name }}-${{ matrix.job.target }}${{ matrix.job.extension }}
+      #     asset_content_type: application/octet-stream
