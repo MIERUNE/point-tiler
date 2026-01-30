@@ -3,53 +3,94 @@ on:
   release:
     types: [published]
 
+env:
+  # proj v9.6.2 (At the time of writing, proj-sys aims for PROJ v9.6.x)
+  # cf. https://github.com/microsoft/vcpkg/commit/63bb67b3ec76131e6297104befb3afb1f6111bd8
+  VCPKG_REF: 63bb67b3ec76131e6297104befb3afb1f6111bd8
+
 jobs:
   release:
-    runs-on: ${{ matrix.job.os }}
+    runs-on: ${{ matrix.config.os }}
     env:
       PROJECT_NAME: point_tiler
     strategy:
       fail-fast: false
       matrix:
-        job:
-          - {os: macos-latest, target: x86_64-apple-darwin, extension: ''}
+        config:
           - {os: macos-latest, target: aarch64-apple-darwin, extension: ''}
+          - {os: macos-15-intel, target: x86_64-apple-darwin, extension: ''}
           - {os: ubuntu-latest, target: x86_64-unknown-linux-gnu, extension: ''}
-          - {os: ubuntu-latest, target: x86_64-unknown-linux-musl, extension: ''}
+          # - {os: ubuntu-latest, target: x86_64-unknown-linux-musl, extension: ''}
           - {os: windows-latest, target: x86_64-pc-windows-msvc, extension: '.exe'}
     permissions:
       contents: write
 
     steps:
       - name: Checkout repository
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
 
       - name: Rust setup
         uses: dtolnay/rust-toolchain@stable
         with:
-          targets: |
-            x86_64-apple-darwin
-            aarch64-apple-darwin
-            x86_64-unknown-linux-gnu
-            x86_64-unknown-linux-musl
-            x86_64-pc-windows-msvc
-
-      - name: Rust cache
-        uses: Swatinem/rust-cache@v2
+          targets: ${{ matrix.config.target }}
 
       - name: Install musl tools (only for musl target)
-        if: matrix.job.target == 'x86_64-unknown-linux-musl'
+        if: matrix.config.target == 'x86_64-unknown-linux-musl'
         run: |
           sudo apt-get update
           sudo apt-get install -y musl-tools
 
+      # We use vcpkg to install PROJ on Windows as well as having pkg-config available. As we can
+      # see, introducing vcpkg feels a bit overkill, but it seems this is the only established way.
+      # The current setup is based on SedonaDB's one (while this is not for Windows):
+      #   https://github.com/apache/sedona-db/blob/e51f5a59c057639c91798cc509df3c92331ae563/.github/workflows/rust.yml#L69-L103
+      #
+      # For reference, possible alternative ways are:
+      # - Use MSYS2 and install mingw-w64-ucrt-x86_64-proj (but this requires windows-gnu target
+      #   instead of windows-msvc).
+      # - Use proj-sys's bundled_proj feature. I feel this should work in theory because Windows GHA
+      #   runner has SQLite installed, but I couldn't find a way to make the build success.
+
+      - name: Clone vcpkg
+        uses: actions/checkout@v6
+        if: runner.os == 'Windows'
+        with:
+          repository: microsoft/vcpkg
+          ref: ${{ env.VCPKG_REF }}
+          path: vcpkg
+
+      - name: Set up environment variables and bootstrap vcpkg
+        if: runner.os == 'Windows'
+        shell: pwsh
+        env:
+          VCPKG_ROOT: ${{ github.workspace }}/vcpkg
+        run: |
+          Set-Location vcpkg
+          .\bootstrap-vcpkg.bat
+          Set-Location ..
+
+          @"
+          VCPKG_ROOT=$env:VCPKG_ROOT
+          PATH=${env:VCPKG_ROOT}/downloads/tools/msys2/21caed2f81ec917b/mingw64/bin/;${env:VCPKG_ROOT}/installed/x64-windows/bin/;${env:PATH}
+          PKG_CONFIG_SYSROOT_DIR=${env:VCPKG_ROOT}/downloads/tools/msys2/21caed2f81ec917b/mingw64/
+          PKG_CONFIG_PATH=${env:VCPKG_ROOT}/installed/x64-windows/lib/pkgconfig/
+          "@ | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
+
+      - name: Install vcpkg dependencies
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          ./vcpkg/vcpkg.exe install proj
+
       - name: Build
-        run: cargo build --release --package app --target ${{ matrix.job.target }}
+        run: cargo build --release --package app --target ${{ matrix.config.target }}
 
       - name: Rename artifact
         run: |
-          mv ./target/${{ matrix.job.target }}/release/app${{ matrix.job.extension }} \
-             ./target/${{ matrix.job.target }}/release/${{ env.PROJECT_NAME }}-${{ github.ref_name }}-${{ matrix.job.target }}${{ matrix.job.extension }}
+          ls -lh ./target/${{ matrix.config.target }}/release/app${{ matrix.config.extension }}
+          mv ./target/${{ matrix.config.target }}/release/app${{ matrix.config.extension }} \
+             ./target/${{ matrix.config.target }}/release/${{ env.PROJECT_NAME }}-${{ github.ref_name }}-${{ matrix.config.target }}${{ matrix.config.extension }}
+        shell: bash
 
       - name: Upload artifact to release
         uses: actions/upload-release-asset@v1
@@ -57,6 +98,6 @@ jobs:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         with:
           upload_url: ${{ github.event.release.upload_url }}
-          asset_path: ./target/${{ matrix.job.target }}/release/${{ env.PROJECT_NAME }}-${{ github.ref_name }}-${{ matrix.job.target }}${{ matrix.job.extension }}
-          asset_name: ${{ env.PROJECT_NAME }}-${{ github.ref_name }}-${{ matrix.job.target }}${{ matrix.job.extension }}
+          asset_path: ./target/${{ matrix.config.target }}/release/${{ env.PROJECT_NAME }}-${{ github.ref_name }}-${{ matrix.config.target }}${{ matrix.config.extension }}
+          asset_name: ${{ env.PROJECT_NAME }}-${{ github.ref_name }}-${{ matrix.config.target }}${{ matrix.config.extension }}
           asset_content_type: application/octet-stream
