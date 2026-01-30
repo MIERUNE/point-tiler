@@ -30,3 +30,6 @@ itertools = "0.13.0"
 gzp = "0.10.1"
 crossbeam = "0.8.4"
 num_cpus = "1.16"
+
+[features]
+bundled-proj = ["coordinate-transformer/bundled-proj"]
