@@ -109,11 +109,10 @@ jobs:
 
       - name: Rename artifact
         run: |
-          ls ./target/
-          ls ./target/${{ matrix.config.target }}/release/
-          ls ./target/${{ matrix.config.target }}/release/app*
+          ls -lh ./target/${{ matrix.config.target }}/release/app${{ matrix.config.extension }}
           mv ./target/${{ matrix.config.target }}/release/app${{ matrix.config.extension }} \
-             ./target/${{ matrix.config.target }}/release/${{ env.PROJECT_NAME }}-${{ github.ref_name }}-${{ matrix.config.target }}${{ matrix.config.extension }}
+             ./target/${{ matrix.config.target }}/release/${{ env.PROJECT_NAME }}-${{ github.ref_name }}-${{ matrix.config.target }}${{ matrix.config.extension }} || true
+        shell: bash
 
       # - name: Upload artifact to release
       #   uses: actions/upload-release-asset@v1
