@@ -7,8 +7,6 @@ env:
   # proj v9.6.2 (At the time of writing, proj-sys aims for PROJ v9.6.x)
   # cf. https://github.com/microsoft/vcpkg/commit/63bb67b3ec76131e6297104befb3afb1f6111bd8
   VCPKG_REF: 63bb67b3ec76131e6297104befb3afb1f6111bd8
-  # Bump this to clear cache
-  CACHE_VERSION: v3
 
 jobs:
   release:
