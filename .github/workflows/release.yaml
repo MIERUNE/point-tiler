@@ -91,7 +91,7 @@ jobs:
       - name: Debug
         run: |
           ls -lh ./target/${{ matrix.config.target }}/release/app${{ matrix.config.extension }}
-          objdump -p ./target/${{ matrix.config.target }}/release/app${{ matrix.config.extension }} | grep -i proj
+          objdump -p ./target/${{ matrix.config.target }}/release/app${{ matrix.config.extension }} | grep -i proj || true
         shell: bash
 
       - name: Upload build artifact (debug)
