@@ -2,6 +2,8 @@ name: Release
 on:
   release:
     types: [published]
+  push:
+    branches: ["*"]
 
 env:
   # proj v9.6.2 (At the time of writing, proj-sys aims for PROJ v9.6.x)
@@ -17,9 +19,9 @@ jobs:
       fail-fast: false
       matrix:
         config:
-          - {os: macos-latest, target: aarch64-apple-darwin, extension: ''}
-          - {os: macos-15-intel, target: x86_64-apple-darwin, extension: ''}
-          - {os: ubuntu-latest, target: x86_64-unknown-linux-gnu, extension: ''}
+          # - {os: macos-latest, target: aarch64-apple-darwin, extension: ''}
+          # - {os: macos-15-intel, target: x86_64-apple-darwin, extension: ''}
+          # - {os: ubuntu-latest, target: x86_64-unknown-linux-gnu, extension: ''}
           # - {os: ubuntu-latest, target: x86_64-unknown-linux-musl, extension: ''}
           - {os: windows-latest, target: x86_64-pc-windows-msvc, extension: '.exe'}
     permissions:
@@ -85,19 +87,31 @@ jobs:
       - name: Build
         run: cargo build --release --package app --target ${{ matrix.config.target }}
 
-      - name: Rename artifact
+      - name: Debug
         run: |
           ls -lh ./target/${{ matrix.config.target }}/release/app${{ matrix.config.extension }}
-          mv ./target/${{ matrix.config.target }}/release/app${{ matrix.config.extension }} \
-             ./target/${{ matrix.config.target }}/release/${{ env.PROJECT_NAME }}-${{ github.ref_name }}-${{ matrix.config.target }}${{ matrix.config.extension }}
+          objdump -p ./target/${{ matrix.config.target }}/release/app${{ matrix.config.extension }} | grep -i proj
         shell: bash
 
-      - name: Upload artifact to release
-        uses: actions/upload-release-asset@v1
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      - name: Upload build artifact (debug)
+        uses: actions/upload-artifact@v4
         with:
-          upload_url: ${{ github.event.release.upload_url }}
-          asset_path: ./target/${{ matrix.config.target }}/release/${{ env.PROJECT_NAME }}-${{ github.ref_name }}-${{ matrix.config.target }}${{ matrix.config.extension }}
-          asset_name: ${{ env.PROJECT_NAME }}-${{ github.ref_name }}-${{ matrix.config.target }}${{ matrix.config.extension }}
-          asset_content_type: application/octet-stream
+          name: app-${{ matrix.config.target }}
+          path: ./target/${{ matrix.config.target }}/release/app${{ matrix.config.extension }}
+
+      # - name: Rename artifact
+      #   run: |
+      #     ls -lh ./target/${{ matrix.config.target }}/release/app${{ matrix.config.extension }}
+      #     mv ./target/${{ matrix.config.target }}/release/app${{ matrix.config.extension }} \
+      #        ./target/${{ matrix.config.target }}/release/${{ env.PROJECT_NAME }}-${{ github.ref_name }}-${{ matrix.config.target }}${{ matrix.config.extension }}
+      #   shell: bash
+
+      # - name: Upload artifact to release
+      #   uses: actions/upload-release-asset@v1
+      #   env:
+      #     GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      #   with:
+      #     upload_url: ${{ github.event.release.upload_url }}
+      #     asset_path: ./target/${{ matrix.config.target }}/release/${{ env.PROJECT_NAME }}-${{ github.ref_name }}-${{ matrix.config.target }}${{ matrix.config.extension }}
+      #     asset_name: ${{ env.PROJECT_NAME }}-${{ github.ref_name }}-${{ matrix.config.target }}${{ matrix.config.extension }}
+      #     asset_content_type: application/octet-stream
