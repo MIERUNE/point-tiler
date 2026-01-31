@@ -3,7 +3,8 @@ on:
   release:
     types: [published]
   push:
-    branches: ["*"]
+    branches:
+      - fix/windows-static-link
 
 env:
   # proj v9.6.2 (At the time of writing, proj-sys aims for PROJ v9.6.x)
