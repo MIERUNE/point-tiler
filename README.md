@@ -1,13 +1,24 @@
 # Point Tiler
 
-A tool for converting point cloud data (las/laz and csv) into "3D Tiles v1.1".
+A tool for converting point cloud data (LAS/LAZ/CSV) into 3D Tiles v1.1.
+
+**English**|[日本語](./README.ja.md)
 
 ![alt text](images/README_image.png)
+
+## Point Tiler?
+
+Point Tiler stands out from existing open-source point cloud tilers in the following ways:
+
+- **Native 3D Tiles 1.1 output** — Directly outputs GLB (glTF Binary) files as specified in 3D Tiles 1.1. Most alternatives still rely on the legacy `.pnts` format (3D Tiles 1.0) or offer only experimental 1.1 support.
+- **LAZ support** — Reads compressed LAZ files with parallel decoding, which is essential for real-world workflows where LAZ is the dominant format.
+- **Large-scale data handling via external sort** — Automatically switches between in-memory and external sort workflows based on the configured memory limit, so you don't need to manually split files to fit in RAM.
+- **Fast conversion** — Built in Rust with Rayon-based parallelism, delivering high throughput for large datasets.
 
 ## Features
 
 - Converts LAS/LAZ/CSV point cloud data to 3D Tiles v1.1 format
-- It has the PROJ library built-in and supports basic coordinate systems.
+- Built-in PROJ library supporting a wide range of coordinate systems
 - High-performance parallel processing with Rayon
 - Streaming processing for large-scale data
 - Voxel-based point decimation for efficient LOD
@@ -114,6 +125,14 @@ For example, the following data is valid.
 -5599.992,-35119.757,3.603,722.000,1.000,1.000,1.000,0.000,1.000,0.000,0.00 0,0.000,0.000,-4.000,0.000,95.000,188552.407,18504.000,20046.000,20817.000
 -5599.992,-35129.327,3.431,505.000,1.000,1.000,1.000,0.000,1.000,0.000,0.00 0,0.000,0.000,-4.000,0.000,95.000,188552.547,18504.000,19789.000,21074.000
 ```
+
+## Roadmap
+
+- [ ] Automatic CRS detection from input files
+- [ ] Export of point attributes (classification, intensity, etc.)
+- [ ] Windows support
+- [ ] Public library API for external integration
+- [ ] PLY format input
 
 ## License
 
