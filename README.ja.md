@@ -76,7 +76,7 @@ Rust をインストールした後、このリポジトリをダウンロード
 ### 使用例
 
 ```sh
-point_tiler --input app/examples/data/sample.las \
+ptiler --input app/examples/data/sample.las \
     --output app/examples/data/output \
     --input-epsg 6677 \
     --output-epsg 4979 \
@@ -98,7 +98,7 @@ point_tiler --input app/examples/data/sample.las \
 **実行コマンド:**
 
 ```sh
-point_tiler --input /path/to/data/*.las \
+ptiler --input /path/to/data/*.las \
     --output /path/to/output \
     --input-epsg 6677 \
     --output-epsg 4979 \

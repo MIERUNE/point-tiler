@@ -4,6 +4,10 @@ edition = "2021"
 version.workspace = true
 authors.workspace = true
 
+[[bin]]
+name = "ptiler"
+path = "src/main.rs"
+
 [dependencies]
 pcd-parser = { path = "../pcd-parser" }
 cesiumtiles-gltf = { path = "../cesiumtiles-gltf" }

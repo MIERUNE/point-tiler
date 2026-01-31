@@ -5,7 +5,7 @@ __wrap__() {
 
 REPO=MIERUNE/point-tiler
 
-VERSION=${POINT_TILER_VERSION:-latest}
+VERSION=${PTILER_VERSION:-latest}
 
 if ! command -v curl > /dev/null 2>&1; then
   echo "Error: 'curl' is required but not installed. Please install it and try again."
@@ -41,18 +41,18 @@ else
   exit 1
 fi
 
-BINARY="point_tiler-${VERSION}-${ARCH}-${PLATFORM}"
+BINARY="ptiler-${VERSION}-${ARCH}-${PLATFORM}"
 
 DOWNLOAD_URL="https://github.com/${REPO}/releases/download/${VERSION}/${BINARY}"
 
-echo "This script will automatically download and install point_tiler (${VERSION}) for you."
+echo "This script will automatically download and install ptiler (${VERSION}) for you."
 
 if [ "x$(id -u)" == "x0" ]; then
   echo "Warning: this script is running as root. This is dangerous and unnecessary!"
 fi
 
 TEMP_DIR=$(mktemp -d)
-TEMP_FILE="$TEMP_DIR/point_tiler"
+TEMP_FILE="$TEMP_DIR/ptiler"
 cleanup() {
   rm -rf "$TEMP_DIR"
 }
@@ -73,10 +73,10 @@ if [[ ! -w $INSTALL_DIR ]]; then
   echo "Please run the script with appropriate permissions or install to a directory you have write access to."
   exit 1
 fi
-mv "$TEMP_FILE" "$INSTALL_DIR/point_tiler"
+mv "$TEMP_FILE" "$INSTALL_DIR/ptiler"
 
 
-echo "point_tiler has been installed successfully to $INSTALL_DIR/point_tiler"
+echo "ptiler has been installed successfully to $INSTALL_DIR/ptiler"
 }
 
 __wrap__
