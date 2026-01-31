@@ -88,6 +88,38 @@ point_tiler --input app/examples/data/sample.las \
     --gzip-compress
 ```
 
+### Benchmark
+
+| Environment | |
+| --- | --- |
+| Machine | Apple M1 Max / 64 GB RAM |
+| OS | macOS (Darwin 23.4.0) |
+
+**Command:**
+
+```sh
+point_tiler --input /path/to/data/*.las \
+    --output /path/to/output \
+    --input-epsg 6677 \
+    --output-epsg 4979 \
+    --min 15 \
+    --max 18 \
+    --max-memory-mb 8192 \
+    --threads 8 \
+    --quantize \
+    --gzip-compress
+```
+
+| Input | |
+| --- | --- |
+| Files | 41 LAS files |
+| Total size | ~8.0 GB |
+
+| Result | |
+| --- | --- |
+| Total time | **4 min 59 sec** (299.1 sec) |
+| Output tiles | 278 tiles |
+
 ### Coordinate Systems
 
 This tool uses the PROJ library for coordinate transformation, supporting any EPSG code.

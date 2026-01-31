@@ -88,6 +88,38 @@ point_tiler --input app/examples/data/sample.las \
     --gzip-compress
 ```
 
+### ベンチマーク
+
+| 実行環境 | |
+| --- | --- |
+| マシン | Apple M1 Max / 64 GB RAM |
+| OS | macOS (Darwin 23.4.0) |
+
+**実行コマンド:**
+
+```sh
+point_tiler --input /path/to/data/*.las \
+    --output /path/to/output \
+    --input-epsg 6677 \
+    --output-epsg 4979 \
+    --min 15 \
+    --max 18 \
+    --max-memory-mb 8192 \
+    --threads 8 \
+    --quantize \
+    --gzip-compress
+```
+
+| 入力データ | |
+| --- | --- |
+| ファイル数 | 41（LAS 形式） |
+| 合計サイズ | 約 8.0 GB |
+
+| 結果 | |
+| --- | --- |
+| 合計時間 | **4分59秒**（299.1秒） |
+| 出力タイル数 | 278 タイル |
+
 ### 座標系
 
 このツールは座標変換に PROJ ライブラリを使用しており、任意の EPSG コードに対応しています。
