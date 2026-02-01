@@ -37,17 +37,26 @@ pub struct Buffer {
     pub extras: Option<Value>,
 }
 
+#[derive(Serialize, Deserialize, Debug, Clone, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub struct BufferExtMeshoptCompression {
+    pub fallback: bool,
+}
+
 #[derive(Serialize, Deserialize, Debug, Default, PartialEq)]
 #[serde(rename_all = "camelCase")]
 pub struct BufferExtensions {
+    #[serde(skip_serializing_if = "Option::is_none")]
+    #[serde(rename = "EXT_meshopt_compression")]
+    pub ext_meshopt_compression: Option<BufferExtMeshoptCompression>,
+
     #[serde(flatten)]
-    others: HashMap<String, Value>,
+    pub others: HashMap<String, Value>,
 }
 
 /// A view into a buffer generally representing a subset of the buffer.
 #[derive(Serialize, Deserialize, Debug, Default, PartialEq, Clone)]
 #[serde(rename_all = "camelCase")]
-#[serde(deny_unknown_fields)]
 pub struct BufferView {
     /// The user-defined name of this object.  This is not necessarily unique, e.g., an accessor and a buffer could have the same name, or two accessors could even have the same name.
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -70,6 +79,10 @@ pub struct BufferView {
     /// The hint representing the intended GPU buffer type to use with this buffer view.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub target: Option<BufferViewTarget>,
+
+    /// JSON object with extension-specific objects.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub extensions: Option<super::extensions::buffer_view::BufferViewExtensions>,
 }
 
 fn is_default<T: Default + PartialEq>(value: &T) -> bool {

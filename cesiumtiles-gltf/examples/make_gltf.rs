@@ -31,6 +31,7 @@ fn main() -> io::Result<()> {
         byte_length: 6,
         byte_stride: None,
         target: Some(BufferViewTarget::ElementArrayBuffer),
+        extensions: None,
     };
 
     let buffer_view2 = BufferView {
@@ -40,6 +41,7 @@ fn main() -> io::Result<()> {
         byte_length: 36,
         byte_stride: None,
         target: Some(BufferViewTarget::ArrayBuffer),
+        extensions: None,
     };
 
     let accessor1 = Accessor {
