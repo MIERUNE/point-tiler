@@ -33,10 +33,13 @@ impl PointCloudDecimator for VoxelDecimator {
             }
         }
 
-        best_points
-            .into_values()
-            .map(|(_, point)| point.clone())
-            .collect()
+        // Sort by Morton code for spatial locality (improves meshopt compression)
+        let mut indexed: Vec<_> = best_points
+            .into_iter()
+            .map(|((x, y, z), (_, point))| (morton_encode_3d(x, y, z), point.clone()))
+            .collect();
+        indexed.sort_unstable_by_key(|(morton, _)| *morton);
+        indexed.into_iter().map(|(_, point)| point).collect()
     }
 }
 
@@ -59,5 +62,54 @@ impl VoxelDecimator {
 
     fn squared_distance(&self, a: &Point, b: (f64, f64, f64)) -> f64 {
         (a.x - b.0).powi(2) + (a.y - b.1).powi(2) + (a.z - b.2).powi(2)
+    }
+}
+
+/// 3D Morton encoding (bit interleaving) for spatial sorting.
+/// Uses 21 bits per coordinate (fits in u64).
+fn morton_encode_3d(x: i64, y: i64, z: i64) -> u64 {
+    fn expand_bits(mut v: u64) -> u64 {
+        v &= 0x1fffff; // 21 bits
+        v = (v | (v << 32)) & 0x1f00000000ffff;
+        v = (v | (v << 16)) & 0x1f0000ff0000ff;
+        v = (v | (v << 8)) & 0x100f00f00f00f00f;
+        v = (v | (v << 4)) & 0x10c30c30c30c30c3;
+        v = (v | (v << 2)) & 0x1249249249249249;
+        v
+    }
+    // Shift to unsigned by adding offset (to handle negative indices)
+    let ux = (x.wrapping_add(1 << 20)) as u64;
+    let uy = (y.wrapping_add(1 << 20)) as u64;
+    let uz = (z.wrapping_add(1 << 20)) as u64;
+    expand_bits(ux) | (expand_bits(uy) << 1) | (expand_bits(uz) << 2)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_morton_encode_3d_origin() {
+        let code = morton_encode_3d(0, 0, 0);
+        assert!(code > 0); // offset ensures non-zero
+    }
+
+    #[test]
+    fn test_morton_encode_3d_spatial_locality() {
+        // Nearby points should have closer Morton codes than distant points
+        let near_a = morton_encode_3d(10, 10, 10);
+        let near_b = morton_encode_3d(11, 10, 10);
+        let far = morton_encode_3d(1000, 1000, 1000);
+
+        let diff_near = near_a.abs_diff(near_b);
+        let diff_far = near_a.abs_diff(far);
+        assert!(diff_near < diff_far);
+    }
+
+    #[test]
+    fn test_morton_encode_3d_negative_indices() {
+        // Should handle negative indices without panicking
+        let _ = morton_encode_3d(-1, -1, -1);
+        let _ = morton_encode_3d(-100, 50, -200);
     }
 }
