@@ -24,7 +24,7 @@ use glob::glob;
 use coordinate_transformer::{PointTransformer, EPSG_WGS84_GEOCENTRIC, EPSG_WGS84_GEOGRAPHIC_3D};
 use itertools::Itertools as _;
 use log::LevelFilter;
-use pcd_exporter::gltf::generate_glb;
+use pcd_exporter::gltf::GlbOptions;
 use pcd_parser::reader::csv::CsvPointReader;
 use pcd_parser::reader::las::LasPointReader;
 use pcd_parser::reader::PointReader;
@@ -39,7 +39,6 @@ use pcd_core::pointcloud::{
 use pcd_exporter::tiling;
 use pcd_exporter::{
     cesiumtiles::make_tile_content,
-    gltf::generate_quantized_glb,
     tiling::{geometric_error, TileContent, TileTree},
 };
 use pcd_parser::parser::{get_extension, Extension};
@@ -81,6 +80,9 @@ struct Cli {
 
     #[arg(long)]
     gzip_compress: bool,
+
+    #[arg(long)]
+    meshopt: bool,
 }
 
 fn check_and_get_extension(paths: &[PathBuf]) -> Result<Extension, String> {
@@ -238,8 +240,7 @@ fn export_tiles_to_glb(
     output_path: &Path,
     min_zoom: u8,
     max_zoom: u8,
-    quantize: bool,
-    gzip_compress: bool,
+    glb_options: &GlbOptions,
 ) -> std::io::Result<Vec<TileContent>> {
     let mut all_tiles = Vec::new();
     for z in min_zoom..=max_zoom {
@@ -300,18 +301,15 @@ fn export_tiles_to_glb(
             let glb_path = output_path.join(&tile_content.content_path);
             fs::create_dir_all(glb_path.parent().unwrap())?;
 
-            let glb = if quantize {
-                generate_quantized_glb(decimated)
-                    .map_err(|e| std::io::Error::other(format!("glb generation failed: {e}")))?
-            } else {
-                generate_glb(decimated)
-                    .map_err(|e| std::io::Error::other(format!("glb generation failed: {e}")))?
-            };
+            let glb = pcd_exporter::gltf::generate_glb_with_options(decimated, glb_options)
+                .map_err(|e| std::io::Error::other(format!("glb generation failed: {e}")))?;
 
-            if gzip_compress {
+            if glb_options.gzip_compress {
                 let file = File::create(glb_path)?;
-                // let writer: ParCompress<Mgzip> = ParCompressBuilder::new().from_writer(file);
-                let writer = BufWriter::new(file);
+                let writer = flate2::write::GzEncoder::new(
+                    BufWriter::new(file),
+                    flate2::Compression::default(),
+                );
                 glb.to_writer_with_alignment(writer, 8)?;
             } else {
                 let file = File::create(glb_path)?;
@@ -514,13 +512,18 @@ fn in_memory_workflow(
     log::info!("start exporting tiles (GLB)...");
     let start_local = std::time::Instant::now();
 
+    let glb_options = GlbOptions {
+        quantize: args.quantize,
+        meshopt: args.meshopt,
+        gzip_compress: args.gzip_compress,
+    };
+
     let tile_contents = export_tiles_to_glb(
         tmp_tiled_file_dir_path.path(),
         output_path,
         args.min,
         max_zoom,
-        args.quantize,
-        args.gzip_compress,
+        &glb_options,
     )?;
 
     log::info!("Finish exporting tiles in {:?}", start_local.elapsed());
@@ -750,13 +753,17 @@ fn external_sort_workflow(
 
         log::info!("start exporting tiles (GLB)...");
         let start_local = std::time::Instant::now();
+        let glb_options = GlbOptions {
+            quantize: args.quantize,
+            meshopt: args.meshopt,
+            gzip_compress: args.gzip_compress,
+        };
         let tile_contents = export_tiles_to_glb(
             tmp_tiled_file_dir_path.path(),
             output_path,
             args.min,
             args.max,
-            args.quantize,
-            args.gzip_compress,
+            &glb_options,
         )
         .unwrap();
         log::info!("Finish exporting tiles in {:?}", start_local.elapsed());
@@ -826,6 +833,7 @@ fn main() -> std::io::Result<()> {
     log::info!("threads: {:?}", args.threads);
     log::info!("quantize: {}", args.quantize);
     log::info!("gzip compress: {}", args.gzip_compress);
+    log::info!("meshopt: {}", args.meshopt);
 
     let start = std::time::Instant::now();
 

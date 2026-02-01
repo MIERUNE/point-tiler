@@ -11,6 +11,7 @@
 Point Tiler は、既存のオープンソース点群タイラーと比較して、以下の点で優れています。
 
 - **3D Tiles 1.1 のネイティブ出力** — GLB（glTF Binary）ファイルを直接出力し、3D Tiles 1.1 に完全対応しています。多くの代替ツールはレガシーな `.pnts` 形式（3D Tiles 1.0）を使用しているか、1.1 サポートは実験的な段階にとどまっています。
+- **多彩な圧縮** — 量子化（`KHR_mesh_quantization`）、meshopt 圧縮（`EXT_meshopt_compression`）、GZIP に対応し、出力ファイルサイズを大幅に削減します。
 - **LAZ 対応** — 圧縮された LAZ ファイルを並列デコードで読み込みます。実際のワークフローでは LAZ が主流のフォーマットであるため、これは不可欠な機能です。
 - **外部ソートによる大規模データ対応** — 設定されたメモリ上限に応じて、インメモリ処理と外部ソート処理を自動的に切り替えます。RAM に収まるようにファイルを手動で分割する必要がありません。
 - **高速な変換処理** — Rust で実装され、Rayon による並列処理を活用し、大規模データセットに対して高いスループットを実現します。
@@ -23,7 +24,8 @@ Point Tiler は、既存のオープンソース点群タイラーと比較し�
 - 大規模データ向けストリーミング処理
 - ボクセルベースの点群間引きによる効率的な LOD 生成
 - 出力タイルの GZIP 圧縮サポート
-- より小さな GLB ファイルのための量子化サポート
+- より小さな GLB ファイルのための量子化サポート（`KHR_mesh_quantization`）
+- GPU 配信に最適化された meshopt 圧縮（`EXT_meshopt_compression`）
 
 ## プロジェクト構成
 
@@ -70,7 +72,8 @@ Rust をインストールした後、このリポジトリをダウンロード
 | `--max`           | 最大ズームレベル（デフォルト: 18）                                                   |
 | `--max-memory-mb` | ワークフロー選択のためのメモリ上限（MB 単位、デフォルト: 4096）                      |
 | `--threads`       | 並列処理のスレッド数（デフォルト: CPU コア数）                                       |
-| `--quantize`      | より小さな GLB ファイルのための量子化を有効化                                        |
+| `--quantize`      | より小さな GLB ファイルのための量子化を有効化（`KHR_mesh_quantization`）              |
+| `--meshopt`       | meshopt 圧縮を有効化（`EXT_meshopt_compression`）                                    |
 | `--gzip-compress` | 出力タイルの GZIP 圧縮を有効化                                                       |
 
 ### 使用例
@@ -85,6 +88,7 @@ ptiler --input app/examples/data/sample.las \
     --max-memory-mb 8192 \
     --threads 8 \
     --quantize \
+    --meshopt \
     --gzip-compress
 ```
 
@@ -107,6 +111,7 @@ ptiler --input /path/to/data/*.las \
     --max-memory-mb 8192 \
     --threads 8 \
     --quantize \
+    --meshopt \
     --gzip-compress
 ```
 
@@ -117,7 +122,7 @@ ptiler --input /path/to/data/*.las \
 
 | 結果 | |
 | --- | --- |
-| 合計時間 | **4分59秒**（299.1秒） |
+| 合計時間 | **3分57秒**（236.9秒） |
 | 出力タイル数 | 278 タイル |
 
 ### 座標系
@@ -161,8 +166,6 @@ CSV 形式では、XYZRGB 以外のカラムは無視されます。
 ## ロードマップ
 
 - [ ] 入力ファイルからの CRS 自動検出
-- [ ] 点属性のエクスポート（classification、intensity など）
-- [ ] Windows サポート
 - [ ] 外部連携のためのライブラリ API 公開
 - [ ] PLY 形式の入力対応
 
