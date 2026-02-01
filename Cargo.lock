@@ -109,7 +109,7 @@ checksum = "e16d2d3311acee920a9eb8d33b8cbc1787ce4a264e85f964c2404b969bdcd487"
 
 [[package]]
 name = "app"
-version = "0.0.6"
+version = "0.0.10"
 dependencies = [
  "bitcode",
  "bytemuck",
@@ -1055,7 +1055,7 @@ checksum = "d6790f58c7ff633d8771f42965289203411a5e5c68388703c06e14f24770b41e"
 
 [[package]]
 name = "pcd-core"
-version = "0.0.6"
+version = "0.0.10"
 dependencies = [
  "bitcode",
  "serde",
@@ -1063,7 +1063,7 @@ dependencies = [
 
 [[package]]
 name = "pcd-exporter"
-version = "0.0.6"
+version = "0.0.10"
 dependencies = [
  "byteorder",
  "cesiumtiles",
@@ -1080,7 +1080,7 @@ dependencies = [
 
 [[package]]
 name = "pcd-parser"
-version = "0.0.6"
+version = "0.0.10"
 dependencies = [
  "csv",
  "las",
