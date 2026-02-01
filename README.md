@@ -11,6 +11,7 @@ A tool for converting point cloud data (LAS/LAZ/CSV) into 3D Tiles v1.1.
 Point Tiler stands out from existing open-source point cloud tilers in the following ways:
 
 - **Native 3D Tiles 1.1 output** — Directly outputs GLB (glTF Binary) files as specified in 3D Tiles 1.1. Most alternatives still rely on the legacy `.pnts` format (3D Tiles 1.0) or offer only experimental 1.1 support.
+- **Versatile compression** — Supports quantization (`KHR_mesh_quantization`), meshopt compression (`EXT_meshopt_compression`), and GZIP to significantly reduce output file sizes.
 - **LAZ support** — Reads compressed LAZ files with parallel decoding, which is essential for real-world workflows where LAZ is the dominant format.
 - **Large-scale data handling via external sort** — Automatically switches between in-memory and external sort workflows based on the configured memory limit, so you don't need to manually split files to fit in RAM.
 - **Fast conversion** — Built in Rust with Rayon-based parallelism, delivering high throughput for large datasets.
@@ -23,7 +24,8 @@ Point Tiler stands out from existing open-source point cloud tilers in the follo
 - Streaming processing for large-scale data
 - Voxel-based point decimation for efficient LOD
 - GZIP compression support for output tiles
-- Quantization support for smaller file sizes
+- Quantization support for smaller file sizes (`KHR_mesh_quantization`)
+- Meshopt compression for optimized GPU delivery (`EXT_meshopt_compression`)
 
 ## Project Structure
 
@@ -70,7 +72,8 @@ After installing Rust, download this repository.
 | `--max`           | Maximum zoom level (default: 18)                                                                 |
 | `--max-memory-mb` | Memory limit in MB for workflow selection (default: 4096)                                        |
 | `--threads`       | Number of threads for parallel processing (default: number of CPU cores)                         |
-| `--quantize`      | Enable quantization for smaller GLB files                                                        |
+| `--quantize`      | Enable quantization for smaller GLB files (`KHR_mesh_quantization`)                              |
+| `--meshopt`       | Enable meshopt compression (`EXT_meshopt_compression`)                                           |
 | `--gzip-compress` | Enable GZIP compression for output tiles                                                         |
 
 ### Example
@@ -85,6 +88,7 @@ ptiler --input app/examples/data/sample.las \
     --max-memory-mb 8192 \
     --threads 8 \
     --quantize \
+    --meshopt \
     --gzip-compress
 ```
 
@@ -107,6 +111,7 @@ ptiler --input /path/to/data/*.las \
     --max-memory-mb 8192 \
     --threads 8 \
     --quantize \
+    --meshopt \
     --gzip-compress
 ```
 
@@ -117,7 +122,7 @@ ptiler --input /path/to/data/*.las \
 
 | Result | |
 | --- | --- |
-| Total time | **4 min 59 sec** (299.1 sec) |
+| Total time | **3 min 57 sec** (236.9 sec) |
 | Output tiles | 278 tiles |
 
 ### Coordinate Systems
@@ -161,8 +166,6 @@ For example, the following data is valid.
 ## Roadmap
 
 - [ ] Automatic CRS detection from input files
-- [ ] Export of point attributes (classification, intensity, etc.)
-- [ ] Windows support
 - [ ] Public library API for external integration
 - [ ] PLY format input
 
