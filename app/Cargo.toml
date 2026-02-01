@@ -32,5 +32,6 @@ tinymvt = "0.0.1"
 kv-extsort = { git = "https://github.com/MIERUNE/kv-extsort-rs.git" }
 itertools = "0.13.0"
 gzp = "0.10.1"
+flate2 = "1"
 crossbeam = "0.8.4"
 num_cpus = "1.16"
