@@ -13,6 +13,7 @@ byteorder = "1.5.0"
 cesiumtiles = { git = "https://github.com/MIERUNE/cesiumtiles-rs.git" }
 tinymvt = "0.0.1"
 rayon = "1.10.0"
+meshopt = "0.6"
 
 [dev-dependencies]
 pcd-parser = { path = "../pcd-parser" }
