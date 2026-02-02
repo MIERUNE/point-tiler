@@ -246,7 +246,7 @@ dependencies = [
 
 [[package]]
 name = "cesiumtiles-gltf"
-version = "0.1.0"
+version = "0.0.10"
 dependencies = [
  "byteorder",
  "cesiumtiles-gltf-json",
@@ -256,7 +256,7 @@ dependencies = [
 
 [[package]]
 name = "cesiumtiles-gltf-json"
-version = "0.1.0"
+version = "0.0.10"
 dependencies = [
  "cesiumtiles",
  "glob",
@@ -369,7 +369,7 @@ checksum = "b05b61dc5112cbb17e4b6cd61790d9845d13888356391624cbe7e41efeac1e75"
 
 [[package]]
 name = "coordinate-transformer"
-version = "0.0.1"
+version = "0.0.10"
 dependencies = [
  "criterion",
  "pcd-core",

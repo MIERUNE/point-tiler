@@ -1,7 +1,8 @@
 [package]
 name = "pcd-parser"
 version.workspace = true
-edition = "2021"
+authors.workspace = true
+edition.workspace = true
 
 [dependencies]
 csv = "1.3.0"

@@ -211,14 +211,14 @@ impl TileTree {
             &mut self.root
         } else {
             let parent = self.get_node(calc_parent_zxy(zoom, x, y));
-            let node = match (x % 2, y % 2) {
+            
+            (match (x % 2, y % 2) {
                 (0, 0) => parent.child00.get_or_insert_with(|| Tile::new(zxy).into()),
                 (0, 1) => parent.child01.get_or_insert_with(|| Tile::new(zxy).into()),
                 (1, 0) => parent.child10.get_or_insert_with(|| Tile::new(zxy).into()),
                 (1, 1) => parent.child11.get_or_insert_with(|| Tile::new(zxy).into()),
                 _ => unreachable!(),
-            };
-            node
+            }) as _
         }
     }
 }

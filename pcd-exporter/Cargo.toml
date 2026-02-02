@@ -1,7 +1,8 @@
 [package]
 name = "pcd-exporter"
 version.workspace = true
-edition = "2021"
+authors.workspace = true
+edition.workspace = true
 
 [dependencies]
 pcd-core = { path = "../pcd-core" }
