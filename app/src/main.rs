@@ -378,11 +378,10 @@ impl Iterator for RunFileIterator {
 
     fn next(&mut self) -> Option<Self::Item> {
         loop {
-            if let Some(ref mut iter) = self.current {
-                if let Some(item) = iter.next() {
+            if let Some(ref mut iter) = self.current
+                && let Some(item) = iter.next() {
                     return Some(item);
                 }
-            }
 
             match self.files.next() {
                 Some(file) => {
