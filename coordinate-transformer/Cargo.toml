@@ -12,4 +12,4 @@ proj-sys = "0.27.0"
 bundled-proj = ["proj-sys/bundled_proj"]
 
 [dev-dependencies]
-criterion = "0.5"
+criterion = "0.8"

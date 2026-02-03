@@ -21,13 +21,13 @@ use glob::glob;
 //     deflate::Mgzip,
 //     par::compress::{ParCompress, ParCompressBuilder},
 // };
-use coordinate_transformer::{PointTransformer, EPSG_WGS84_GEOCENTRIC, EPSG_WGS84_GEOGRAPHIC_3D};
+use coordinate_transformer::{EPSG_WGS84_GEOCENTRIC, EPSG_WGS84_GEOGRAPHIC_3D, PointTransformer};
 use itertools::Itertools as _;
 use log::LevelFilter;
 use pcd_exporter::gltf::GlbOptions;
+use pcd_parser::reader::PointReader;
 use pcd_parser::reader::csv::CsvPointReader;
 use pcd_parser::reader::las::LasPointReader;
-use pcd_parser::reader::PointReader;
 use rayon::iter::{IntoParallelIterator as _, IntoParallelRefIterator as _, ParallelIterator as _};
 use tempfile::tempdir;
 use tinymvt::tileid::hilbert;
@@ -39,9 +39,9 @@ use pcd_core::pointcloud::{
 use pcd_exporter::tiling;
 use pcd_exporter::{
     cesiumtiles::make_tile_content,
-    tiling::{geometric_error, TileContent, TileTree},
+    tiling::{TileContent, TileTree, geometric_error},
 };
-use pcd_parser::parser::{get_extension, Extension};
+use pcd_parser::parser::{Extension, get_extension};
 
 #[derive(Parser, Debug, Clone)]
 #[command(
@@ -338,13 +338,13 @@ pub enum TileIdMethod {
 impl TileIdMethod {
     pub fn zxy_to_id(&self, z: u8, x: u32, y: u32) -> u64 {
         match self {
-            TileIdMethod::Hilbert => hilbert::zxy_to_id(z, x, y),
+            TileIdMethod::Hilbert => hilbert::zxy_to_hilbert(z, x, y),
         }
     }
 
     pub fn id_to_zxy(&self, tile_id: u64) -> (u8, u32, u32) {
         match self {
-            TileIdMethod::Hilbert => hilbert::id_to_zxy(tile_id),
+            TileIdMethod::Hilbert => hilbert::hilbert_to_zxy(tile_id),
         }
     }
 }
@@ -379,9 +379,10 @@ impl Iterator for RunFileIterator {
     fn next(&mut self) -> Option<Self::Item> {
         loop {
             if let Some(ref mut iter) = self.current
-                && let Some(item) = iter.next() {
-                    return Some(item);
-                }
+                && let Some(item) = iter.next()
+            {
+                return Some(item);
+            }
 
             match self.files.next() {
                 Some(file) => {
