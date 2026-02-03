@@ -6,4 +6,4 @@ edition.workspace = true
 
 [dependencies]
 bitcode = "0.6.3"
-serde = "1.0.215"
+serde = "1.0.228"
