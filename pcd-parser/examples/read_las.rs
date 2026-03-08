@@ -1,6 +1,6 @@
 use std::path::PathBuf;
 
-use pcd_parser::parser::{las::LasParserProvider, ParserProvider as _};
+use pcd_parser::parser::{ParserProvider as _, las::LasParserProvider};
 
 fn main() {
     let provider = LasParserProvider {

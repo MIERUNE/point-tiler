@@ -1,6 +1,6 @@
 use std::path::PathBuf;
 
-use pcd_parser::parser::{csv::CsvParserProvider, ParserProvider as _};
+use pcd_parser::parser::{ParserProvider as _, csv::CsvParserProvider};
 
 fn main() {
     let provider = CsvParserProvider {

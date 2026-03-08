@@ -205,7 +205,6 @@ fn get_field_value<'a>(
     field_name: &str,
 ) -> Option<&'a str> {
     if let Some(&index) = field_mapping.get(field_name) {
-        
         record.get(index)
     } else {
         None

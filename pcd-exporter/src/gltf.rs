@@ -2,12 +2,12 @@ use std::{collections::HashMap, error::Error, io::Write};
 
 use byteorder::{ByteOrder as _, LittleEndian};
 use cesiumtiles_gltf_json::{
+    Accessor, AccessorType, Buffer, BufferExtMeshoptCompression, BufferExtensions, BufferView,
+    BufferViewTarget, ComponentType, Gltf, Mesh, MeshPrimitive, Node, Scene,
     extensions::buffer_view::{
         BufferViewExtensions, ExtMeshoptCompression, MeshoptCompressionFilter,
         MeshoptCompressionMode,
     },
-    Accessor, AccessorType, Buffer, BufferExtMeshoptCompression, BufferExtensions, BufferView,
-    BufferViewTarget, ComponentType, Gltf, Mesh, MeshPrimitive, Node, Scene,
 };
 use pcd_core::pointcloud::point::PointCloud;
 
@@ -29,11 +29,7 @@ pub fn quantize_unsigned_norm(value: f32, bits: i32) -> i32 {
 }
 
 fn rcp(value: f32) -> f32 {
-    if value != 0.0 {
-        1.0 / value
-    } else {
-        0.0
-    }
+    if value != 0.0 { 1.0 / value } else { 0.0 }
 }
 
 /// Encode vertex buffer using meshopt with version 0 (EXT_meshopt_compression compatible).
@@ -380,7 +376,6 @@ pub fn generate_glb_with_options<'a>(
     assemble_glb(info, options.meshopt)
 }
 
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -667,5 +662,4 @@ mod tests {
             assert!(parsed.bin.is_some());
         }
     }
-
 }

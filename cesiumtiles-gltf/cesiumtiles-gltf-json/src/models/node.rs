@@ -132,7 +132,9 @@ mod tests {
         let node: Node = Default::default();
         assert_eq!(
             node.matrix,
-            [1.0, 0.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 0.0, 1.0]
+            [
+                1.0, 0.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 0.0, 1.0
+            ]
         );
         assert_eq!(node.translation, [0.0, 0.0, 0.0]);
         assert_eq!(node.rotation, [0.0, 0.0, 0.0, 1.0]);
@@ -143,7 +145,9 @@ mod tests {
         let node: Node = serde_json::from_str("{}").unwrap();
         assert_eq!(
             node.matrix,
-            [1.0, 0.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 0.0, 1.0]
+            [
+                1.0, 0.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 0.0, 1.0
+            ]
         );
         assert_eq!(node.translation, [0.0, 0.0, 0.0]);
         assert_eq!(node.rotation, [0.0, 0.0, 0.0, 1.0]);
