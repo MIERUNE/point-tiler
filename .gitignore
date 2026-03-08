@@ -1,6 +1,6 @@
 /target
 .vscode
 .tmp
-.playwright-mcp
+.playwright-cli
 .claude
 .serena
