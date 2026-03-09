@@ -32,10 +32,7 @@ use rayon::iter::{IntoParallelIterator as _, IntoParallelRefIterator as _, Paral
 use tempfile::tempdir;
 use tinymvt::tileid::hilbert;
 
-use pcd_core::pointcloud::{
-    decimation::decimator::{PointCloudDecimator, VoxelDecimator},
-    point::{Point, PointCloud},
-};
+use pcd_core::pointcloud::point::{Point, PointCloud};
 use pcd_exporter::tiling;
 use pcd_exporter::{
     cesiumtiles::make_tile_content,
@@ -83,7 +80,12 @@ struct Cli {
 
     #[arg(long)]
     meshopt: bool,
+
+    #[arg(long)]
+    disable_decimation: bool,
 }
+
+const IN_MEMORY_WORKFLOW_MULTIPLIER: u64 = 5;
 
 fn check_and_get_extension(paths: &[PathBuf]) -> Result<Extension, String> {
     let mut extensions = vec![];
@@ -193,42 +195,128 @@ fn get_tile_list_for_zoom(base_path: &Path, z: u8) -> Vec<PathBuf> {
             .unwrap()
             .filter_map(Result::ok),
     );
+    files.sort();
     files
 }
 
-fn aggregate_zoom_level(base_path: &Path, z: u8) -> std::io::Result<()> {
+fn meters_per_degree_latitude(latitude_deg: f64) -> f64 {
+    let lat = latitude_deg.to_radians();
+    111_132.92 - 559.82 * (2.0 * lat).cos() + 1.175 * (4.0 * lat).cos()
+}
+
+fn meters_per_degree_longitude(latitude_deg: f64) -> f64 {
+    let lat = latitude_deg.to_radians();
+    111_412.84 * lat.cos() - 93.5 * (3.0 * lat).cos()
+}
+
+fn maybe_decimate_points(tile: (u8, u32, u32), points: Vec<Point>, disable: bool) -> Vec<Point> {
+    if disable || points.is_empty() {
+        return points;
+    }
+
+    let (z, _, y) = tile;
+    let voxel_size = geometric_error(z, y) * 0.1;
+
+    let (min_lon, max_lon, min_lat, max_lat, min_height) = points.iter().fold(
+        (f64::MAX, f64::MIN, f64::MAX, f64::MIN, f64::MAX),
+        |(min_lon, max_lon, min_lat, max_lat, min_height), point| {
+            (
+                min_lon.min(point.x),
+                max_lon.max(point.x),
+                min_lat.min(point.y),
+                max_lat.max(point.y),
+                min_height.min(point.z),
+            )
+        },
+    );
+
+    let origin_lon = (min_lon + max_lon) * 0.5;
+    let origin_lat = (min_lat + max_lat) * 0.5;
+    let meters_per_lon = meters_per_degree_longitude(origin_lat).max(1.0);
+    let meters_per_lat = meters_per_degree_latitude(origin_lat);
+
+    let mut best_points: HashMap<(i64, i64, i64), (f64, usize)> = HashMap::new();
+
+    for (index, point) in points.iter().enumerate() {
+        let local_x = (point.x - origin_lon) * meters_per_lon;
+        let local_y = (point.y - origin_lat) * meters_per_lat;
+        let local_z = point.z - min_height;
+
+        let voxel_index = (
+            (local_x / voxel_size).floor() as i64,
+            (local_y / voxel_size).floor() as i64,
+            (local_z / voxel_size).floor() as i64,
+        );
+        let voxel_center = (
+            (voxel_index.0 as f64 + 0.5) * voxel_size,
+            (voxel_index.1 as f64 + 0.5) * voxel_size,
+            (voxel_index.2 as f64 + 0.5) * voxel_size,
+        );
+        let distance = (local_x - voxel_center.0).powi(2)
+            + (local_y - voxel_center.1).powi(2)
+            + (local_z - voxel_center.2).powi(2);
+
+        match best_points.get_mut(&voxel_index) {
+            Some((best_distance, best_index)) => {
+                if distance < *best_distance {
+                    *best_distance = distance;
+                    *best_index = index;
+                }
+            }
+            None => {
+                best_points.insert(voxel_index, (distance, index));
+            }
+        }
+    }
+
+    let mut selected = best_points.into_iter().collect::<Vec<_>>();
+    selected.sort_unstable_by_key(|(voxel_index, _)| *voxel_index);
+
+    selected
+        .into_iter()
+        .map(|(_, (_, point_index))| points[point_index].clone())
+        .collect()
+}
+
+fn group_child_files_by_parent(
+    child_files: Vec<PathBuf>,
+    z: u8,
+) -> HashMap<(u8, u32, u32), Vec<PathBuf>> {
+    let mut parent_files = HashMap::<(u8, u32, u32), Vec<PathBuf>>::new();
+
+    for child_file in child_files {
+        let (_, cx, cy) = extract_tile_coords(&child_file);
+        parent_files
+            .entry((z, cx / 2, cy / 2))
+            .or_default()
+            .push(child_file);
+    }
+
+    for files in parent_files.values_mut() {
+        files.sort();
+    }
+
+    parent_files
+}
+
+fn aggregate_zoom_level(base_path: &Path, z: u8, disable_decimation: bool) -> std::io::Result<()> {
     let child_z = z + 1;
     let child_files = get_tile_list_for_zoom(base_path, child_z);
 
-    let parent_map: HashMap<(u8, u32, u32), Vec<Point>> = child_files
-        .par_iter()
-        .try_fold(
-            HashMap::<(u8, u32, u32), Vec<Point>>::new,
-            |mut map, child_file| -> std::io::Result<_> {
-                let (cz, cx, cy) = extract_tile_coords(child_file);
-                debug_assert_eq!(cz, child_z);
-
-                let parent_coords = (z, cx / 2, cy / 2);
-                let mut points = read_points_from_tile(child_file)?;
-                map.entry(parent_coords).or_default().append(&mut points);
-
-                Ok(map)
-            },
-        )
-        .try_reduce(
-            HashMap::<(u8, u32, u32), Vec<Point>>::new,
-            |mut a, b| -> std::io::Result<_> {
-                for (k, mut v) in b {
-                    a.entry(k).or_default().append(&mut v);
-                }
-                Ok(a)
-            },
-        )?;
-
-    parent_map
+    group_child_files_by_parent(child_files, z)
         .into_par_iter()
-        .try_for_each(|(parent_tile, pts)| -> std::io::Result<()> {
-            write_points_to_tile(base_path, parent_tile, &pts)?;
+        .try_for_each(|(parent_tile, child_files)| -> std::io::Result<()> {
+            let mut points = Vec::new();
+
+            for child_file in child_files {
+                let (cz, _, _) = extract_tile_coords(&child_file);
+                debug_assert_eq!(cz, child_z);
+                let mut child_points = read_points_from_tile(&child_file)?;
+                points.append(&mut child_points);
+            }
+
+            let points = maybe_decimate_points(parent_tile, points, disable_decimation);
+            write_points_to_tile(base_path, parent_tile, &points)?;
             Ok(())
         })?;
 
@@ -292,16 +380,11 @@ fn export_tiles_to_glb(
             // Store ECEF offset in TileContent (before axis swap)
             tile_content.translation = ecef_min;
 
-            let geometric_error_value = geometric_error(tz, ty);
-            let voxel_size = geometric_error_value * 0.1;
-            let decimator = VoxelDecimator { voxel_size };
-            let decimated_points = decimator.decimate(&points);
-            let decimated = PointCloud::new(decimated_points, epsg);
-
             let glb_path = output_path.join(&tile_content.content_path);
             fs::create_dir_all(glb_path.parent().unwrap())?;
 
-            let glb = pcd_exporter::gltf::generate_glb_with_options(decimated, glb_options)
+            let glb_point_cloud = PointCloud::new(points, epsg);
+            let glb = pcd_exporter::gltf::generate_glb_with_options(glb_point_cloud, glb_options)
                 .map_err(|e| std::io::Error::other(format!("glb generation failed: {e}")))?;
 
             if glb_options.gzip_compress {
@@ -404,6 +487,62 @@ fn estimate_total_size(paths: &[PathBuf]) -> u64 {
         .sum()
 }
 
+fn estimate_processing_size(paths: &[PathBuf], extension: Extension) -> u64 {
+    match extension {
+        Extension::Las | Extension::Laz => paths
+            .iter()
+            .map(LasPointReader::estimate_processing_size)
+            .sum(),
+        Extension::Csv | Extension::Txt => estimate_total_size(paths),
+    }
+}
+
+fn estimated_in_memory_requirement_bytes(processing_size: u64) -> u64 {
+    processing_size.saturating_mul(IN_MEMORY_WORKFLOW_MULTIPLIER)
+}
+
+fn should_use_in_memory(processing_size: u64, max_memory_bytes: u64) -> bool {
+    estimated_in_memory_requirement_bytes(processing_size) <= max_memory_bytes
+}
+
+fn collect_file_sizes(base_path: &Path, files: &mut Vec<(PathBuf, u64)>) -> std::io::Result<()> {
+    for entry in fs::read_dir(base_path)? {
+        let entry = entry?;
+        let path = entry.path();
+        let metadata = entry.metadata()?;
+        if metadata.is_dir() {
+            collect_file_sizes(&path, files)?;
+        } else if metadata.is_file() {
+            files.push((path, metadata.len()));
+        }
+    }
+    Ok(())
+}
+
+fn log_directory_sizes(label: &str, base_path: &Path, max_entries: usize) {
+    let mut files = Vec::new();
+    match collect_file_sizes(base_path, &mut files) {
+        Ok(()) => {
+            files.sort_by(|a, b| b.1.cmp(&a.1).then_with(|| a.0.cmp(&b.0)));
+            let total_bytes: u64 = files.iter().map(|(_, size)| *size).sum();
+            log::info!(
+                "{} total size: {} bytes across {} files at {:?}",
+                label,
+                total_bytes,
+                files.len(),
+                base_path
+            );
+            for (path, size) in files.iter().take(max_entries) {
+                let relative = path.strip_prefix(base_path).unwrap_or(path);
+                log::info!("{} file: {:?} ({} bytes)", label, relative, size);
+            }
+        }
+        Err(e) => {
+            log::warn!("Failed to inspect {} at {:?}: {}", label, base_path, e);
+        }
+    }
+}
+
 fn in_memory_workflow(
     input_files: Vec<PathBuf>,
     args: &Cli,
@@ -487,6 +626,8 @@ fn in_memory_workflow(
         .into_par_iter()
         .try_for_each(|(tile_id, points)| -> std::io::Result<()> {
             let (z, x, y) = TileIdMethod::Hilbert.id_to_zxy(tile_id);
+            let tile = (z, x, y);
+            let points = maybe_decimate_points(tile, points, args.disable_decimation);
 
             let tile_path = tmp_tiled_file_dir_path
                 .path()
@@ -500,12 +641,22 @@ fn in_memory_workflow(
         })?;
 
     log::info!("Wrote tile files in {:?}", start_local.elapsed());
+    log_directory_sizes(
+        "tile files after leaf write",
+        tmp_tiled_file_dir_path.path(),
+        32,
+    );
 
     log::info!("start zoom aggregation...");
     let start_local = std::time::Instant::now();
     for z in (args.min..max_zoom).rev() {
         log::info!("aggregating zoom level: {}", z);
-        aggregate_zoom_level(tmp_tiled_file_dir_path.path(), z)?;
+        aggregate_zoom_level(tmp_tiled_file_dir_path.path(), z, args.disable_decimation)?;
+        log_directory_sizes(
+            &format!("tile files after aggregating z={}", z),
+            tmp_tiled_file_dir_path.path(),
+            32,
+        );
     }
     log::info!("Finish zoom aggregation in {:?}", start_local.elapsed());
 
@@ -527,6 +678,12 @@ fn in_memory_workflow(
     )?;
 
     log::info!("Finish exporting tiles in {:?}", start_local.elapsed());
+    log_directory_sizes(
+        "tile files before cleanup",
+        tmp_tiled_file_dir_path.path(),
+        32,
+    );
+    log_directory_sizes("glb output", output_path, 32);
 
     drop(tmp_tiled_file_dir_path);
 
@@ -575,9 +732,7 @@ fn external_sort_workflow(
             channel_capacity = 1;
         }
 
-        // Optimize channel capacity based on CPU core count
-        let num_cores = num_cpus::get();
-        channel_capacity = std::cmp::max(channel_capacity, num_cores * 2);
+        let num_cores = args.threads.filter(|&n| n > 0).unwrap_or(num_cpus::get());
 
         let extension = check_and_get_extension(&input_files).unwrap();
         let epsg_in = args.input_epsg;
@@ -682,6 +837,7 @@ fn external_sort_workflow(
             "Finish transforming and tiling in {:?}",
             start_local.elapsed()
         );
+        log_directory_sizes("run files", tmp_run_file_dir_path.path(), 32);
     }
 
     {
@@ -722,6 +878,7 @@ fn external_sort_workflow(
 
             let tile_id = key.tile_id;
             let tile = TileIdMethod::Hilbert.id_to_zxy(tile_id);
+            let points = maybe_decimate_points(tile, points, args.disable_decimation);
 
             let (z, x, y) = tile;
             let tile_path = tmp_tiled_file_dir_path
@@ -738,6 +895,8 @@ fn external_sort_workflow(
             writer.write_all(&encoded).unwrap();
         }
         log::info!("Finish sorting in {:?}", start_local.elapsed());
+        log_directory_sizes("run files before cleanup", tmp_run_file_dir_path.path(), 32);
+        log_directory_sizes("tile files after sort", tmp_tiled_file_dir_path.path(), 32);
 
         drop(tmp_run_file_dir_path);
 
@@ -747,7 +906,13 @@ fn external_sort_workflow(
         // The parent tile coordinates are calculated from the file with the maximum zoom level
         for z in (args.min..args.max).rev() {
             log::info!("aggregating zoom level: {}", z);
-            aggregate_zoom_level(tmp_tiled_file_dir_path.path(), z).unwrap();
+            aggregate_zoom_level(tmp_tiled_file_dir_path.path(), z, args.disable_decimation)
+                .unwrap();
+            log_directory_sizes(
+                &format!("tile files after aggregating z={}", z),
+                tmp_tiled_file_dir_path.path(),
+                32,
+            );
         }
         log::info!("Finish zoom aggregation in {:?}", start_local.elapsed());
 
@@ -767,6 +932,12 @@ fn external_sort_workflow(
         )
         .unwrap();
         log::info!("Finish exporting tiles in {:?}", start_local.elapsed());
+        log_directory_sizes(
+            "tile files before cleanup",
+            tmp_tiled_file_dir_path.path(),
+            32,
+        );
+        log_directory_sizes("glb output", output_path, 32);
 
         drop(tmp_tiled_file_dir_path);
 
@@ -834,6 +1005,7 @@ fn main() -> std::io::Result<()> {
     log::info!("quantize: {}", args.quantize);
     log::info!("gzip compress: {}", args.gzip_compress);
     log::info!("meshopt: {}", args.meshopt);
+    log::info!("disable decimation: {}", args.disable_decimation);
 
     let start = std::time::Instant::now();
 
@@ -844,15 +1016,21 @@ fn main() -> std::io::Result<()> {
     let output_path = PathBuf::from(args.output.clone());
     std::fs::create_dir_all(&output_path).unwrap();
 
+    let extension = check_and_get_extension(&input_files).unwrap();
     let total_size = estimate_total_size(&input_files);
+    let processing_size = estimate_processing_size(&input_files, extension);
     let max_memory_bytes = args.max_memory_mb as u64 * 1024 * 1024;
+    let estimated_in_memory_requirement = estimated_in_memory_requirement_bytes(processing_size);
     log::info!(
-        "Total input size: {}, threshold: {}",
+        "Total input size: {}, estimated processing size: {}, estimated in-memory requirement (x{}): {}, threshold: {}",
         total_size,
+        processing_size,
+        IN_MEMORY_WORKFLOW_MULTIPLIER,
+        estimated_in_memory_requirement,
         max_memory_bytes
     );
 
-    if total_size <= max_memory_bytes {
+    if should_use_in_memory(processing_size, max_memory_bytes) {
         log::info!("Using in-memory workflow");
         in_memory_workflow(input_files, &args, &output_path)?;
     } else {
@@ -864,4 +1042,77 @@ fn main() -> std::io::Result<()> {
     log::info!("Finish processing");
 
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use pcd_core::pointcloud::point::{Color, PointAttributes};
+    use tempfile::tempdir;
+
+    fn point(x: f64, y: f64, z: f64) -> Point {
+        Point {
+            x,
+            y,
+            z,
+            color: Color::default(),
+            attributes: PointAttributes {
+                intensity: None,
+                return_number: None,
+                classification: None,
+                scanner_channel: None,
+                scan_angle: None,
+                user_data: None,
+                point_source_id: None,
+                gps_time: None,
+            },
+        }
+    }
+
+    #[test]
+    fn maybe_decimate_points_can_be_disabled() {
+        let tile = (18, 0, 0);
+        let points = vec![point(1.0, 2.0, 3.0), point(4.0, 5.0, 6.0)];
+        let decimated = maybe_decimate_points(tile, points.clone(), true);
+        assert_eq!(decimated.len(), points.len());
+        assert_eq!(decimated[0].x, points[0].x);
+        assert_eq!(decimated[1].x, points[1].x);
+    }
+
+    #[test]
+    fn group_child_files_by_parent_groups_four_children() {
+        let child_files = vec![
+            PathBuf::from("/tmp/18/10/20.bin"),
+            PathBuf::from("/tmp/18/10/21.bin"),
+            PathBuf::from("/tmp/18/11/20.bin"),
+            PathBuf::from("/tmp/18/11/21.bin"),
+        ];
+
+        let grouped = group_child_files_by_parent(child_files, 17);
+        assert_eq!(grouped.len(), 1);
+        let files = grouped.get(&(17, 5, 10)).unwrap();
+        assert_eq!(files.len(), 4);
+    }
+
+    #[test]
+    fn aggregate_zoom_level_without_decimation_preserves_all_points() {
+        let dir = tempdir().unwrap();
+        write_points_to_tile(dir.path(), (18, 10, 20), &[point(1.0, 1.0, 1.0)]).unwrap();
+        write_points_to_tile(dir.path(), (18, 10, 21), &[point(2.0, 2.0, 2.0)]).unwrap();
+        write_points_to_tile(dir.path(), (18, 11, 20), &[point(3.0, 3.0, 3.0)]).unwrap();
+        write_points_to_tile(dir.path(), (18, 11, 21), &[point(4.0, 4.0, 4.0)]).unwrap();
+
+        aggregate_zoom_level(dir.path(), 17, true).unwrap();
+
+        let parent_points = read_points_from_tile(&dir.path().join("17/5/10.bin")).unwrap();
+        assert_eq!(parent_points.len(), 4);
+    }
+
+    #[test]
+    fn should_use_in_memory_requires_five_times_processing_size() {
+        let processing_size = 100;
+
+        assert!(!should_use_in_memory(processing_size, 499));
+        assert!(should_use_in_memory(processing_size, 500));
+    }
 }
