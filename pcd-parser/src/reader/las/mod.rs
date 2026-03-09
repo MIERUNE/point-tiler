@@ -24,6 +24,15 @@ impl LasPointReader {
         })
     }
 
+    pub fn estimate_processing_size(path: &PathBuf) -> u64 {
+        Reader::from_path(path)
+            .map(|reader| {
+                let header = reader.header();
+                header.number_of_points() * u64::from(header.point_format().len())
+            })
+            .unwrap_or_else(|_| path.metadata().map(|m| m.len()).unwrap_or(0))
+    }
+
     pub fn open_next_file(&mut self) -> io::Result<()> {
         if self.current_file_index < self.files.len() {
             let path = &self.files[self.current_file_index];
