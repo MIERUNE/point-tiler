@@ -32,10 +32,7 @@ use rayon::iter::{IntoParallelIterator as _, IntoParallelRefIterator as _, Paral
 use tempfile::tempdir;
 use tinymvt::tileid::hilbert;
 
-use pcd_core::pointcloud::{
-    decimation::decimator::{PointCloudDecimator, VoxelDecimator},
-    point::{Point, PointCloud},
-};
+use pcd_core::pointcloud::point::{Point, PointCloud};
 use pcd_exporter::tiling;
 use pcd_exporter::{
     cesiumtiles::make_tile_content,
@@ -83,6 +80,59 @@ struct Cli {
 
     #[arg(long)]
     meshopt: bool,
+
+    #[arg(long)]
+    disable_decimation: bool,
+}
+
+const IN_MEMORY_WORKFLOW_MULTIPLIER: u64 = 5;
+
+#[derive(Debug, Clone, Copy, Decode, Encode)]
+struct CompactPoint {
+    x: f64,
+    y: f64,
+    z: f64,
+    r: u16,
+    g: u16,
+    b: u16,
+}
+
+impl From<Point> for CompactPoint {
+    fn from(point: Point) -> Self {
+        Self {
+            x: point.x,
+            y: point.y,
+            z: point.z,
+            r: point.color.r,
+            g: point.color.g,
+            b: point.color.b,
+        }
+    }
+}
+
+impl From<CompactPoint> for Point {
+    fn from(point: CompactPoint) -> Self {
+        Self {
+            x: point.x,
+            y: point.y,
+            z: point.z,
+            color: pcd_core::pointcloud::point::Color {
+                r: point.r,
+                g: point.g,
+                b: point.b,
+            },
+            attributes: pcd_core::pointcloud::point::PointAttributes {
+                intensity: None,
+                return_number: None,
+                classification: None,
+                scanner_channel: None,
+                scan_angle: None,
+                user_data: None,
+                point_source_id: None,
+                gps_time: None,
+            },
+        }
+    }
 }
 
 fn check_and_get_extension(paths: &[PathBuf]) -> Result<Extension, String> {
@@ -132,10 +182,8 @@ fn write_points_to_tile(
     fs::create_dir_all(tile_path.parent().unwrap())?;
 
     let file = File::create(tile_path)?;
-    // let mut writer: ParCompress<Mgzip> = ParCompressBuilder::new().from_writer(file);
-    let mut writer = BufWriter::new(file);
-
     let encoded = bitcode::encode(points);
+    let mut writer = BufWriter::new(file);
     writer.write_all(&encoded)?;
 
     Ok(())
@@ -143,7 +191,6 @@ fn write_points_to_tile(
 
 fn read_points_from_tile(file_path: &Path) -> std::io::Result<Vec<Point>> {
     let file = File::open(file_path)?;
-    // let mut buf_reader = MgzipSyncReader::new(file);
     let mut buf_reader = BufReader::new(file);
     let mut buffer = Vec::new();
     buf_reader.read_to_end(&mut buffer)?;
@@ -193,42 +240,178 @@ fn get_tile_list_for_zoom(base_path: &Path, z: u8) -> Vec<PathBuf> {
             .unwrap()
             .filter_map(Result::ok),
     );
+    files.sort();
     files
 }
 
-fn aggregate_zoom_level(base_path: &Path, z: u8) -> std::io::Result<()> {
+fn extract_shard_coords(file_path: &Path) -> (u8, u32, u32) {
+    let y_dir = file_path.parent().unwrap();
+    let x_dir = y_dir.parent().unwrap();
+    let z_dir = x_dir.parent().unwrap();
+
+    let z: u8 = z_dir
+        .file_name()
+        .unwrap()
+        .to_str()
+        .unwrap()
+        .parse()
+        .unwrap();
+    let x: u32 = x_dir
+        .file_name()
+        .unwrap()
+        .to_str()
+        .unwrap()
+        .parse()
+        .unwrap();
+    let y: u32 = y_dir
+        .file_name()
+        .unwrap()
+        .to_str()
+        .unwrap()
+        .parse()
+        .unwrap();
+
+    (z, x, y)
+}
+
+fn group_run_files_by_shard(base_path: &Path, shard_z: u8) -> Vec<((u8, u32, u32), Vec<PathBuf>)> {
+    let pattern = base_path.join(format!("{}/**/*.bin", shard_z));
+    let mut grouped = HashMap::<(u8, u32, u32), Vec<PathBuf>>::new();
+
+    for file in glob::glob(pattern.to_str().unwrap())
+        .unwrap()
+        .filter_map(Result::ok)
+    {
+        let shard = extract_shard_coords(&file);
+        grouped.entry(shard).or_default().push(file);
+    }
+
+    let mut entries = grouped.into_iter().collect::<Vec<_>>();
+    entries.sort_by_key(|(shard, _)| *shard);
+    for (_, files) in &mut entries {
+        files.sort();
+    }
+    entries
+}
+
+fn meters_per_degree_latitude(latitude_deg: f64) -> f64 {
+    let lat = latitude_deg.to_radians();
+    111_132.92 - 559.82 * (2.0 * lat).cos() + 1.175 * (4.0 * lat).cos()
+}
+
+fn meters_per_degree_longitude(latitude_deg: f64) -> f64 {
+    let lat = latitude_deg.to_radians();
+    111_412.84 * lat.cos() - 93.5 * (3.0 * lat).cos()
+}
+
+fn maybe_decimate_points(tile: (u8, u32, u32), points: Vec<Point>, disable: bool) -> Vec<Point> {
+    if disable || points.is_empty() {
+        return points;
+    }
+
+    let (z, _, y) = tile;
+    let voxel_size = geometric_error(z, y) * 0.1;
+
+    let (min_lon, max_lon, min_lat, max_lat, min_height) = points.iter().fold(
+        (f64::MAX, f64::MIN, f64::MAX, f64::MIN, f64::MAX),
+        |(min_lon, max_lon, min_lat, max_lat, min_height), point| {
+            (
+                min_lon.min(point.x),
+                max_lon.max(point.x),
+                min_lat.min(point.y),
+                max_lat.max(point.y),
+                min_height.min(point.z),
+            )
+        },
+    );
+
+    let origin_lon = (min_lon + max_lon) * 0.5;
+    let origin_lat = (min_lat + max_lat) * 0.5;
+    let meters_per_lon = meters_per_degree_longitude(origin_lat).max(1.0);
+    let meters_per_lat = meters_per_degree_latitude(origin_lat);
+
+    let mut best_points: HashMap<(i64, i64, i64), (f64, usize)> = HashMap::new();
+
+    for (index, point) in points.iter().enumerate() {
+        let local_x = (point.x - origin_lon) * meters_per_lon;
+        let local_y = (point.y - origin_lat) * meters_per_lat;
+        let local_z = point.z - min_height;
+
+        let voxel_index = (
+            (local_x / voxel_size).floor() as i64,
+            (local_y / voxel_size).floor() as i64,
+            (local_z / voxel_size).floor() as i64,
+        );
+        let voxel_center = (
+            (voxel_index.0 as f64 + 0.5) * voxel_size,
+            (voxel_index.1 as f64 + 0.5) * voxel_size,
+            (voxel_index.2 as f64 + 0.5) * voxel_size,
+        );
+        let distance = (local_x - voxel_center.0).powi(2)
+            + (local_y - voxel_center.1).powi(2)
+            + (local_z - voxel_center.2).powi(2);
+
+        match best_points.get_mut(&voxel_index) {
+            Some((best_distance, best_index)) => {
+                if distance < *best_distance {
+                    *best_distance = distance;
+                    *best_index = index;
+                }
+            }
+            None => {
+                best_points.insert(voxel_index, (distance, index));
+            }
+        }
+    }
+
+    let mut selected = best_points.into_iter().collect::<Vec<_>>();
+    selected.sort_unstable_by_key(|(voxel_index, _)| *voxel_index);
+
+    selected
+        .into_iter()
+        .map(|(_, (_, point_index))| points[point_index].clone())
+        .collect()
+}
+
+fn group_child_files_by_parent(
+    child_files: Vec<PathBuf>,
+    z: u8,
+) -> HashMap<(u8, u32, u32), Vec<PathBuf>> {
+    let mut parent_files = HashMap::<(u8, u32, u32), Vec<PathBuf>>::new();
+
+    for child_file in child_files {
+        let (_, cx, cy) = extract_tile_coords(&child_file);
+        parent_files
+            .entry((z, cx / 2, cy / 2))
+            .or_default()
+            .push(child_file);
+    }
+
+    for files in parent_files.values_mut() {
+        files.sort();
+    }
+
+    parent_files
+}
+
+fn aggregate_zoom_level(base_path: &Path, z: u8, disable_decimation: bool) -> std::io::Result<()> {
     let child_z = z + 1;
     let child_files = get_tile_list_for_zoom(base_path, child_z);
 
-    let parent_map: HashMap<(u8, u32, u32), Vec<Point>> = child_files
-        .par_iter()
-        .try_fold(
-            HashMap::<(u8, u32, u32), Vec<Point>>::new,
-            |mut map, child_file| -> std::io::Result<_> {
-                let (cz, cx, cy) = extract_tile_coords(child_file);
-                debug_assert_eq!(cz, child_z);
-
-                let parent_coords = (z, cx / 2, cy / 2);
-                let mut points = read_points_from_tile(child_file)?;
-                map.entry(parent_coords).or_default().append(&mut points);
-
-                Ok(map)
-            },
-        )
-        .try_reduce(
-            HashMap::<(u8, u32, u32), Vec<Point>>::new,
-            |mut a, b| -> std::io::Result<_> {
-                for (k, mut v) in b {
-                    a.entry(k).or_default().append(&mut v);
-                }
-                Ok(a)
-            },
-        )?;
-
-    parent_map
+    group_child_files_by_parent(child_files, z)
         .into_par_iter()
-        .try_for_each(|(parent_tile, pts)| -> std::io::Result<()> {
-            write_points_to_tile(base_path, parent_tile, &pts)?;
+        .try_for_each(|(parent_tile, child_files)| -> std::io::Result<()> {
+            let mut points = Vec::new();
+
+            for child_file in child_files {
+                let (cz, _, _) = extract_tile_coords(&child_file);
+                debug_assert_eq!(cz, child_z);
+                let mut child_points = read_points_from_tile(&child_file)?;
+                points.append(&mut child_points);
+            }
+
+            let points = maybe_decimate_points(parent_tile, points, disable_decimation);
+            write_points_to_tile(base_path, parent_tile, &points)?;
             Ok(())
         })?;
 
@@ -292,16 +475,11 @@ fn export_tiles_to_glb(
             // Store ECEF offset in TileContent (before axis swap)
             tile_content.translation = ecef_min;
 
-            let geometric_error_value = geometric_error(tz, ty);
-            let voxel_size = geometric_error_value * 0.1;
-            let decimator = VoxelDecimator { voxel_size };
-            let decimated_points = decimator.decimate(&points);
-            let decimated = PointCloud::new(decimated_points, epsg);
-
             let glb_path = output_path.join(&tile_content.content_path);
             fs::create_dir_all(glb_path.parent().unwrap())?;
 
-            let glb = pcd_exporter::gltf::generate_glb_with_options(decimated, glb_options)
+            let glb_point_cloud = PointCloud::new(points, epsg);
+            let glb = pcd_exporter::gltf::generate_glb_with_options(glb_point_cloud, glb_options)
                 .map_err(|e| std::io::Error::other(format!("glb generation failed: {e}")))?;
 
             if glb_options.gzip_compress {
@@ -351,7 +529,7 @@ impl TileIdMethod {
 
 struct RunFileIterator {
     files: std::vec::IntoIter<PathBuf>,
-    current: Option<std::vec::IntoIter<(SortKey, Point)>>,
+    current: Option<std::vec::IntoIter<(SortKey, CompactPoint)>>,
 }
 
 impl RunFileIterator {
@@ -362,19 +540,18 @@ impl RunFileIterator {
         }
     }
 
-    fn read_run_file(path: PathBuf) -> Result<Vec<(SortKey, Point)>, Infallible> {
+    fn read_run_file(path: PathBuf) -> Result<Vec<(SortKey, CompactPoint)>, Infallible> {
         let file = File::open(path).unwrap();
-        // let mut buf_reader = MgzipSyncReader::new(file);
-        let mut buf_reader = file;
+        let mut reader = BufReader::new(file);
         let mut buffer = Vec::new();
-        buf_reader.read_to_end(&mut buffer).unwrap();
-        let data: Vec<(SortKey, Point)> = bitcode::decode(&buffer[..]).unwrap();
+        reader.read_to_end(&mut buffer).unwrap();
+        let data: Vec<(SortKey, CompactPoint)> = bitcode::decode(&buffer[..]).unwrap();
         Ok(data)
     }
 }
 
 impl Iterator for RunFileIterator {
-    type Item = (SortKey, Point);
+    type Item = (SortKey, CompactPoint);
 
     fn next(&mut self) -> Option<Self::Item> {
         loop {
@@ -402,6 +579,78 @@ fn estimate_total_size(paths: &[PathBuf]) -> u64 {
         .iter()
         .map(|p| p.metadata().map(|m| m.len()).unwrap_or(0))
         .sum()
+}
+
+fn estimate_processing_size(paths: &[PathBuf], extension: Extension) -> u64 {
+    match extension {
+        Extension::Las | Extension::Laz => paths
+            .iter()
+            .map(LasPointReader::estimate_processing_size)
+            .sum(),
+        Extension::Csv | Extension::Txt => estimate_total_size(paths),
+    }
+}
+
+fn estimated_in_memory_requirement_bytes(processing_size: u64) -> u64 {
+    processing_size.saturating_mul(IN_MEMORY_WORKFLOW_MULTIPLIER)
+}
+
+fn should_use_in_memory(processing_size: u64, max_memory_bytes: u64) -> bool {
+    estimated_in_memory_requirement_bytes(processing_size) <= max_memory_bytes
+}
+
+fn collect_file_sizes(base_path: &Path, files: &mut Vec<(PathBuf, u64)>) -> std::io::Result<()> {
+    for entry in fs::read_dir(base_path)? {
+        let entry = entry?;
+        let path = entry.path();
+        let metadata = entry.metadata()?;
+        if metadata.is_dir() {
+            collect_file_sizes(&path, files)?;
+        } else if metadata.is_file() {
+            files.push((path, metadata.len()));
+        }
+    }
+    Ok(())
+}
+
+fn format_size(bytes: u64) -> String {
+    const KIB: f64 = 1024.0;
+    const MIB: f64 = 1024.0 * 1024.0;
+    const GIB: f64 = 1024.0 * 1024.0 * 1024.0;
+
+    let bytes = bytes as f64;
+    if bytes >= GIB {
+        format!("{:.2} GiB", bytes / GIB)
+    } else if bytes >= MIB {
+        format!("{:.2} MiB", bytes / MIB)
+    } else if bytes >= KIB {
+        format!("{:.2} KiB", bytes / KIB)
+    } else {
+        format!("{} B", bytes as u64)
+    }
+}
+
+fn summarize_directory(base_path: &Path) -> std::io::Result<(usize, u64)> {
+    let mut files = Vec::new();
+    collect_file_sizes(base_path, &mut files)?;
+    let total_bytes = files.iter().map(|(_, size)| *size).sum();
+    Ok((files.len(), total_bytes))
+}
+
+fn log_directory_summary(label: &str, base_path: &Path) {
+    match summarize_directory(base_path) {
+        Ok((file_count, total_bytes)) => {
+            log::info!(
+                "{}: {} across {} files",
+                label,
+                format_size(total_bytes),
+                file_count
+            );
+        }
+        Err(e) => {
+            log::warn!("Failed to inspect {} at {:?}: {}", label, base_path, e);
+        }
+    }
 }
 
 fn in_memory_workflow(
@@ -487,25 +736,35 @@ fn in_memory_workflow(
         .into_par_iter()
         .try_for_each(|(tile_id, points)| -> std::io::Result<()> {
             let (z, x, y) = TileIdMethod::Hilbert.id_to_zxy(tile_id);
+            let tile = (z, x, y);
+            let points = maybe_decimate_points(tile, points, args.disable_decimation);
 
             let tile_path = tmp_tiled_file_dir_path
                 .path()
                 .join(format!("{}/{}/{}.bin", z, x, y));
             fs::create_dir_all(tile_path.parent().unwrap())?;
             let file = File::create(tile_path)?;
-            let mut writer = BufWriter::new(file);
             let encoded = bitcode::encode(&points);
+            let mut writer = BufWriter::new(file);
             writer.write_all(&encoded)?;
             Ok(())
         })?;
 
     log::info!("Wrote tile files in {:?}", start_local.elapsed());
+    log_directory_summary(
+        "tile files after leaf write",
+        tmp_tiled_file_dir_path.path(),
+    );
 
     log::info!("start zoom aggregation...");
     let start_local = std::time::Instant::now();
     for z in (args.min..max_zoom).rev() {
         log::info!("aggregating zoom level: {}", z);
-        aggregate_zoom_level(tmp_tiled_file_dir_path.path(), z)?;
+        aggregate_zoom_level(tmp_tiled_file_dir_path.path(), z, args.disable_decimation)?;
+        log_directory_summary(
+            &format!("tile files after aggregating z={}", z),
+            tmp_tiled_file_dir_path.path(),
+        );
     }
     log::info!("Finish zoom aggregation in {:?}", start_local.elapsed());
 
@@ -527,6 +786,8 @@ fn in_memory_workflow(
     )?;
 
     log::info!("Finish exporting tiles in {:?}", start_local.elapsed());
+    log_directory_summary("tile files before cleanup", tmp_tiled_file_dir_path.path());
+    log_directory_summary("glb output", output_path);
 
     drop(tmp_tiled_file_dir_path);
 
@@ -563,6 +824,7 @@ fn external_sort_workflow(
     let start_local = std::time::Instant::now();
 
     let tmp_run_file_dir_path = tempdir().unwrap();
+    let mut tile_contents_all = Vec::new();
 
     {
         let max_memory_mb: usize = args.max_memory_mb;
@@ -575,16 +837,14 @@ fn external_sort_workflow(
             channel_capacity = 1;
         }
 
-        // Optimize channel capacity based on CPU core count
-        let num_cores = num_cpus::get();
-        channel_capacity = std::cmp::max(channel_capacity, num_cores * 2);
+        let num_cores = args.threads.filter(|&n| n > 0).unwrap_or(num_cpus::get());
 
         let extension = check_and_get_extension(&input_files).unwrap();
         let epsg_in = args.input_epsg;
         let epsg_out = args.output_epsg;
 
-        log::info!("max_memory_mb_bytes: {}", max_memory_mb_bytes);
-        log::info!("one_chunk_mem: {}", one_chunk_mem);
+        log::info!("memory budget: {}", format_size(max_memory_mb_bytes as u64));
+        log::info!("reader chunk target: {}", format_size(one_chunk_mem as u64));
         log::info!("channel_capacity: {}", channel_capacity);
         log::info!("num_cores: {}", num_cores);
 
@@ -645,33 +905,33 @@ fn external_sort_workflow(
         drop(tx);
 
         for (current_run_index, chunk) in rx.into_iter().enumerate() {
-            let mut keyed_points: Vec<(SortKey, Point)> = chunk
-                .into_iter()
-                .map(|p| {
-                    // let transformed = transform_point(p, args.input_epsg, args.output_epsg, &jgd2wgs);
+            let mut shard_points = HashMap::<(u8, u32, u32), Vec<(SortKey, CompactPoint)>>::new();
 
-                    let tile_coords = tiling::scheme::zxy_from_lng_lat(args.max, p.x, p.y);
-                    let tile_id = TileIdMethod::Hilbert.zxy_to_id(
-                        tile_coords.0,
-                        tile_coords.1,
-                        tile_coords.2,
-                    );
+            for p in chunk {
+                let shard = tiling::scheme::zxy_from_lng_lat(args.min, p.x, p.y);
+                let tile_coords = tiling::scheme::zxy_from_lng_lat(args.max, p.x, p.y);
+                let tile_id =
+                    TileIdMethod::Hilbert.zxy_to_id(tile_coords.0, tile_coords.1, tile_coords.2);
 
-                    (SortKey { tile_id }, p)
-                })
-                .collect();
+                shard_points
+                    .entry(shard)
+                    .or_default()
+                    .push((SortKey { tile_id }, CompactPoint::from(p)));
+            }
 
-            keyed_points.sort_by_key(|(k, _)| k.tile_id);
+            for ((shard_z, shard_x, shard_y), mut keyed_points) in shard_points {
+                keyed_points.sort_by_key(|(k, _)| k.tile_id);
 
-            let run_file_path = tmp_run_file_dir_path
-                .path()
-                .join(format!("run_{}.bin", current_run_index));
-            let file = fs::File::create(run_file_path).unwrap();
-            // let mut writer: ParCompress<Mgzip> = ParCompressBuilder::new().from_writer(file);
-            let mut writer = BufWriter::new(file);
-
-            let encoded = bitcode::encode(&keyed_points);
-            writer.write_all(&encoded).unwrap();
+                let run_file_path = tmp_run_file_dir_path.path().join(format!(
+                    "{}/{}/{}/run_{}.bin",
+                    shard_z, shard_x, shard_y, current_run_index
+                ));
+                fs::create_dir_all(run_file_path.parent().unwrap()).unwrap();
+                let file = fs::File::create(run_file_path).unwrap();
+                let encoded = bitcode::encode(&keyed_points);
+                let mut writer = BufWriter::new(file);
+                writer.write_all(&encoded).unwrap();
+            }
         }
 
         for handle in handles {
@@ -682,96 +942,161 @@ fn external_sort_workflow(
             "Finish transforming and tiling in {:?}",
             start_local.elapsed()
         );
+        log_directory_summary("run files after sharding", tmp_run_file_dir_path.path());
     }
 
     {
-        log::info!("start sorting...");
+        log::info!("start shard processing...");
         let start_local = std::time::Instant::now();
 
-        let pattern = tmp_run_file_dir_path.path().join("run_*.bin");
-        let run_files = glob::glob(pattern.to_str().unwrap())
-            .unwrap()
-            .map(|r| r.unwrap())
-            .collect::<Vec<_>>();
-
-        let tile_id_iter = RunFileIterator::new(run_files);
-
-        let config =
-            kv_extsort::SortConfig::default().max_chunk_bytes(args.max_memory_mb * 1024 * 1024);
-        let sorted_iter = kv_extsort::sort(
-            tile_id_iter.map(|(key, point)| {
-                let encoded_point = bitcode::encode(&point);
-                std::result::Result::<_, Infallible>::Ok((key, encoded_point))
-            }),
-            config,
-        );
-
-        let grouped_iter = sorted_iter.chunk_by(|res| match res {
-            Ok((key, _)) => (false, *key),
-            Err(_) => (true, SortKey { tile_id: 0 }),
-        });
-
-        let tmp_tiled_file_dir_path = tempdir().unwrap();
-
-        for ((_, key), group) in &grouped_iter {
-            let points = group
-                .into_iter()
-                .map(|r| r.map(|(_, p)| bitcode::decode::<Point>(&p).unwrap()))
-                .collect::<Result<Vec<_>, _>>()
-                .unwrap();
-
-            let tile_id = key.tile_id;
-            let tile = TileIdMethod::Hilbert.id_to_zxy(tile_id);
-
-            let (z, x, y) = tile;
-            let tile_path = tmp_tiled_file_dir_path
-                .path()
-                .join(format!("{}/{}/{}.bin", z, x, y));
-
-            fs::create_dir_all(tile_path.parent().unwrap()).unwrap();
-
-            let file = fs::File::create(tile_path).unwrap();
-            // let mut writer: ParCompress<Mgzip> = ParCompressBuilder::new().from_writer(file);
-            let mut writer = BufWriter::new(file);
-
-            let encoded = bitcode::encode(&points);
-            writer.write_all(&encoded).unwrap();
-        }
-        log::info!("Finish sorting in {:?}", start_local.elapsed());
-
-        drop(tmp_run_file_dir_path);
-
-        log::info!("start zoom aggregation...");
-        let start_local = std::time::Instant::now();
-
-        // The parent tile coordinates are calculated from the file with the maximum zoom level
-        for z in (args.min..args.max).rev() {
-            log::info!("aggregating zoom level: {}", z);
-            aggregate_zoom_level(tmp_tiled_file_dir_path.path(), z).unwrap();
-        }
-        log::info!("Finish zoom aggregation in {:?}", start_local.elapsed());
-
-        log::info!("start exporting tiles (GLB)...");
-        let start_local = std::time::Instant::now();
+        let shard_runs = group_run_files_by_shard(tmp_run_file_dir_path.path(), args.min);
+        let total_shards = shard_runs.len();
+        let mut peak_shard_run_bytes = 0u64;
+        let mut peak_shard_tile_bytes = 0u64;
+        let mut peak_live_intermediate_bytes = 0u64;
+        let mut remaining_run_bytes = shard_runs
+            .iter()
+            .flat_map(|(_, files)| files.iter())
+            .map(|path| path.metadata().map(|m| m.len()).unwrap_or(0))
+            .sum::<u64>();
         let glb_options = GlbOptions {
             quantize: args.quantize,
             meshopt: args.meshopt,
             gzip_compress: args.gzip_compress,
         };
-        let tile_contents = export_tiles_to_glb(
-            tmp_tiled_file_dir_path.path(),
-            output_path,
-            args.min,
-            args.max,
-            &glb_options,
-        )
-        .unwrap();
-        log::info!("Finish exporting tiles in {:?}", start_local.elapsed());
 
-        drop(tmp_tiled_file_dir_path);
+        for (index, (shard, run_files)) in shard_runs.into_iter().enumerate() {
+            let shard_run_bytes = run_files
+                .iter()
+                .map(|path| path.metadata().map(|m| m.len()).unwrap_or(0))
+                .sum::<u64>();
+            let shard_run_dir = run_files
+                .first()
+                .and_then(|path| path.parent())
+                .map(Path::to_path_buf);
+            peak_shard_run_bytes = peak_shard_run_bytes.max(shard_run_bytes);
+            log::info!(
+                "shard {}/{}: z{}/{}/{} with {} run files ({})",
+                index + 1,
+                total_shards,
+                shard.0,
+                shard.1,
+                shard.2,
+                run_files.len(),
+                format_size(shard_run_bytes)
+            );
+
+            let tile_id_iter = RunFileIterator::new(run_files);
+            let config =
+                kv_extsort::SortConfig::default().max_chunk_bytes(args.max_memory_mb * 1024 * 1024);
+            let sorted_iter = kv_extsort::sort(
+                tile_id_iter.map(|(key, point)| {
+                    let encoded_point = bitcode::encode(&point);
+                    std::result::Result::<_, Infallible>::Ok((key, encoded_point))
+                }),
+                config,
+            );
+
+            let grouped_iter = sorted_iter.chunk_by(|res| match res {
+                Ok((key, _)) => (false, *key),
+                Err(_) => (true, SortKey { tile_id: 0 }),
+            });
+
+            let tmp_tiled_file_dir_path = tempdir().unwrap();
+
+            for ((_, key), group) in &grouped_iter {
+                let points = group
+                    .into_iter()
+                    .map(|r| {
+                        r.map(|(_, p)| {
+                            let point = bitcode::decode::<CompactPoint>(&p).unwrap();
+                            Point::from(point)
+                        })
+                    })
+                    .collect::<Result<Vec<_>, _>>()
+                    .unwrap();
+
+                let tile_id = key.tile_id;
+                let tile = TileIdMethod::Hilbert.id_to_zxy(tile_id);
+                let points = maybe_decimate_points(tile, points, args.disable_decimation);
+
+                let (z, x, y) = tile;
+                let tile_path = tmp_tiled_file_dir_path
+                    .path()
+                    .join(format!("{}/{}/{}.bin", z, x, y));
+
+                fs::create_dir_all(tile_path.parent().unwrap()).unwrap();
+
+                let file = fs::File::create(tile_path).unwrap();
+                let encoded = bitcode::encode(&points);
+                let mut writer = BufWriter::new(file);
+                writer.write_all(&encoded).unwrap();
+            }
+            log_directory_summary(
+                "tile files after shard sort",
+                tmp_tiled_file_dir_path.path(),
+            );
+
+            for z in (args.min..args.max).rev() {
+                aggregate_zoom_level(tmp_tiled_file_dir_path.path(), z, args.disable_decimation)
+                    .unwrap();
+            }
+
+            log_directory_summary(
+                "tile files before shard cleanup",
+                tmp_tiled_file_dir_path.path(),
+            );
+            let mut shard_tile_files = Vec::new();
+            collect_file_sizes(tmp_tiled_file_dir_path.path(), &mut shard_tile_files)?;
+            let shard_tile_bytes = shard_tile_files.iter().map(|(_, size)| *size).sum::<u64>();
+            peak_shard_tile_bytes = peak_shard_tile_bytes.max(shard_tile_bytes);
+            peak_live_intermediate_bytes =
+                peak_live_intermediate_bytes.max(remaining_run_bytes + shard_tile_bytes);
+
+            let tile_contents = export_tiles_to_glb(
+                tmp_tiled_file_dir_path.path(),
+                output_path,
+                args.min,
+                args.max,
+                &glb_options,
+            )
+            .unwrap();
+            tile_contents_all.extend(tile_contents);
+
+            remaining_run_bytes = remaining_run_bytes.saturating_sub(shard_run_bytes);
+            if let Some(shard_run_dir) = shard_run_dir {
+                fs::remove_dir_all(&shard_run_dir)?;
+            }
+            log::info!(
+                "shard {}/{} done: tile bins {}, live intermediates {}",
+                index + 1,
+                total_shards,
+                format_size(shard_tile_bytes),
+                format_size(remaining_run_bytes + shard_tile_bytes)
+            );
+        }
+
+        log::info!("Finish shard processing in {:?}", start_local.elapsed());
+        log::info!(
+            "peak shard run files: {}",
+            format_size(peak_shard_run_bytes)
+        );
+        log::info!(
+            "peak shard tile files: {}",
+            format_size(peak_shard_tile_bytes)
+        );
+        log::info!(
+            "peak live intermediate files: {}",
+            format_size(peak_live_intermediate_bytes)
+        );
+        log_directory_summary("run files before cleanup", tmp_run_file_dir_path.path());
+
+        drop(tmp_run_file_dir_path);
+
+        log_directory_summary("glb output", output_path);
 
         let mut tree = TileTree::default();
-        for content in tile_contents {
+        for content in tile_contents_all {
             tree.add_content(content);
         }
 
@@ -834,6 +1159,7 @@ fn main() -> std::io::Result<()> {
     log::info!("quantize: {}", args.quantize);
     log::info!("gzip compress: {}", args.gzip_compress);
     log::info!("meshopt: {}", args.meshopt);
+    log::info!("disable decimation: {}", args.disable_decimation);
 
     let start = std::time::Instant::now();
 
@@ -844,15 +1170,21 @@ fn main() -> std::io::Result<()> {
     let output_path = PathBuf::from(args.output.clone());
     std::fs::create_dir_all(&output_path).unwrap();
 
+    let extension = check_and_get_extension(&input_files).unwrap();
     let total_size = estimate_total_size(&input_files);
+    let processing_size = estimate_processing_size(&input_files, extension);
     let max_memory_bytes = args.max_memory_mb as u64 * 1024 * 1024;
+    let estimated_in_memory_requirement = estimated_in_memory_requirement_bytes(processing_size);
     log::info!(
-        "Total input size: {}, threshold: {}",
-        total_size,
-        max_memory_bytes
+        "input size: {}, estimated processing size: {}, estimated in-memory requirement (x{}): {}, threshold: {}",
+        format_size(total_size),
+        format_size(processing_size),
+        IN_MEMORY_WORKFLOW_MULTIPLIER,
+        format_size(estimated_in_memory_requirement),
+        format_size(max_memory_bytes)
     );
 
-    if total_size <= max_memory_bytes {
+    if should_use_in_memory(processing_size, max_memory_bytes) {
         log::info!("Using in-memory workflow");
         in_memory_workflow(input_files, &args, &output_path)?;
     } else {
@@ -864,4 +1196,77 @@ fn main() -> std::io::Result<()> {
     log::info!("Finish processing");
 
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use pcd_core::pointcloud::point::{Color, PointAttributes};
+    use tempfile::tempdir;
+
+    fn point(x: f64, y: f64, z: f64) -> Point {
+        Point {
+            x,
+            y,
+            z,
+            color: Color::default(),
+            attributes: PointAttributes {
+                intensity: None,
+                return_number: None,
+                classification: None,
+                scanner_channel: None,
+                scan_angle: None,
+                user_data: None,
+                point_source_id: None,
+                gps_time: None,
+            },
+        }
+    }
+
+    #[test]
+    fn maybe_decimate_points_can_be_disabled() {
+        let tile = (18, 0, 0);
+        let points = vec![point(1.0, 2.0, 3.0), point(4.0, 5.0, 6.0)];
+        let decimated = maybe_decimate_points(tile, points.clone(), true);
+        assert_eq!(decimated.len(), points.len());
+        assert_eq!(decimated[0].x, points[0].x);
+        assert_eq!(decimated[1].x, points[1].x);
+    }
+
+    #[test]
+    fn group_child_files_by_parent_groups_four_children() {
+        let child_files = vec![
+            PathBuf::from("/tmp/18/10/20.bin"),
+            PathBuf::from("/tmp/18/10/21.bin"),
+            PathBuf::from("/tmp/18/11/20.bin"),
+            PathBuf::from("/tmp/18/11/21.bin"),
+        ];
+
+        let grouped = group_child_files_by_parent(child_files, 17);
+        assert_eq!(grouped.len(), 1);
+        let files = grouped.get(&(17, 5, 10)).unwrap();
+        assert_eq!(files.len(), 4);
+    }
+
+    #[test]
+    fn aggregate_zoom_level_without_decimation_preserves_all_points() {
+        let dir = tempdir().unwrap();
+        write_points_to_tile(dir.path(), (18, 10, 20), &[point(1.0, 1.0, 1.0)]).unwrap();
+        write_points_to_tile(dir.path(), (18, 10, 21), &[point(2.0, 2.0, 2.0)]).unwrap();
+        write_points_to_tile(dir.path(), (18, 11, 20), &[point(3.0, 3.0, 3.0)]).unwrap();
+        write_points_to_tile(dir.path(), (18, 11, 21), &[point(4.0, 4.0, 4.0)]).unwrap();
+
+        aggregate_zoom_level(dir.path(), 17, true).unwrap();
+
+        let parent_points = read_points_from_tile(&dir.path().join("17/5/10.bin")).unwrap();
+        assert_eq!(parent_points.len(), 4);
+    }
+
+    #[test]
+    fn should_use_in_memory_requires_five_times_processing_size() {
+        let processing_size = 100;
+
+        assert!(!should_use_in_memory(processing_size, 499));
+        assert!(should_use_in_memory(processing_size, 500));
+    }
 }
