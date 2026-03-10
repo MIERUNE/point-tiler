@@ -13,7 +13,7 @@ Point Tiler stands out from existing open-source point cloud tilers in the follo
 - **Native 3D Tiles 1.1 output** — Directly outputs GLB (glTF Binary) files as specified in 3D Tiles 1.1. Most alternatives still rely on the legacy `.pnts` format (3D Tiles 1.0) or offer only experimental 1.1 support.
 - **Versatile compression** — Supports quantization (`KHR_mesh_quantization`), meshopt compression (`EXT_meshopt_compression`), and GZIP to significantly reduce output file sizes.
 - **LAZ support** — Reads compressed LAZ files with parallel decoding, which is essential for real-world workflows where LAZ is the dominant format.
-- **Large-scale data handling via external sort** — Automatically switches between in-memory and external sort workflows based on the configured memory limit, so you don't need to manually split files to fit in RAM.
+- **Large-scale data handling via external sort** — Automatically switches between in-memory and external sort workflows based on a conservative in-memory estimate, so you don't need to manually split files to fit in RAM.
 - **Fast conversion** — Built in Rust with Rayon-based parallelism, delivering high throughput for large datasets.
 
 ## Features
@@ -62,19 +62,20 @@ After installing Rust, download this repository.
 
 ### Options
 
-| Option            | Description                                                                                      |
-| ----------------- | ------------------------------------------------------------------------------------------------ |
-| `--input`, `-i`   | Input file path(s). Supports `.las`, `.laz`, `.csv`, `.txt`. Multiple files can be specified.    |
-| `--output`, `-o`  | Output folder path. Outputs `tileset.json` and GLB files.                                        |
-| `--input-epsg`    | EPSG code of the input coordinate system. Supports any EPSG code via PROJ.                       |
-| `--output-epsg`   | EPSG code of the output coordinate system. Typically EPSG:4979 (WGS84 Geographic 3D) for Cesium. |
-| `--min`           | Minimum zoom level (default: 15)                                                                 |
-| `--max`           | Maximum zoom level (default: 18)                                                                 |
-| `--max-memory-mb` | Memory limit in MB for workflow selection (default: 4096)                                        |
-| `--threads`       | Number of threads for parallel processing (default: number of CPU cores)                         |
-| `--quantize`      | Enable quantization for smaller GLB files (`KHR_mesh_quantization`)                              |
-| `--meshopt`       | Enable meshopt compression (`EXT_meshopt_compression`)                                           |
-| `--gzip-compress` | Enable GZIP compression for output tiles                                                         |
+| Option                 | Description                                                                                                                                                |
+| ---------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `--input`, `-i`        | Input file path(s). Supports `.las`, `.laz`, `.csv`, `.txt`. Multiple files can be specified.                                                              |
+| `--output`, `-o`       | Output folder path. Outputs `tileset.json` and GLB files.                                                                                                  |
+| `--input-epsg`         | EPSG code of the input coordinate system. Supports any EPSG code via PROJ.                                                                                 |
+| `--output-epsg`        | EPSG code of the output coordinate system. Typically EPSG:4979 (WGS84 Geographic 3D) for Cesium.                                                           |
+| `--min`                | Minimum zoom level (default: 15)                                                                                                                           |
+| `--max`                | Maximum zoom level (default: 18)                                                                                                                           |
+| `--max-memory-mb`      | Memory budget in MB used for workflow selection. In-memory mode is chosen only when `estimated processing size × 5` fits within this value (default: 4096) |
+| `--threads`            | Number of threads for parallel processing (default: number of CPU cores)                                                                                   |
+| `--quantize`           | Enable quantization for smaller GLB files (`KHR_mesh_quantization`)                                                                                        |
+| `--meshopt`            | Enable meshopt compression (`EXT_meshopt_compression`)                                                                                                     |
+| `--gzip-compress`      | Enable GZIP compression for output tiles                                                                                                                   |
+| `--disable-decimation` | Disable decimation during intermediate file generation and keep original point density                                                                     |
 
 ### Example
 
@@ -94,10 +95,10 @@ ptiler --input app/examples/data/sample.las \
 
 ### Benchmark
 
-| Environment | |
-| --- | --- |
-| Machine | Apple M1 Max / 64 GB RAM |
-| OS | macOS (Darwin 23.4.0) |
+| Environment |                          |
+| ----------- | ------------------------ |
+| Machine     | Apple M1 Max / 64 GB RAM |
+| OS          | macOS (Darwin 23.4.0)    |
 
 **Command:**
 
@@ -115,15 +116,30 @@ ptiler --input /path/to/data/*.las \
     --gzip-compress
 ```
 
-| Input | |
-| --- | --- |
-| Files | 41 LAS files |
-| Total size | ~8.0 GB |
+| Input      |              |
+| ---------- | ------------ |
+| Files      | 41 LAS files |
+| Total size | ~8.0 GB      |
 
-| Result | |
-| --- | --- |
-| Total time | **3 min 57 sec** (236.9 sec) |
-| Output tiles | 278 tiles |
+| Result       |                              |
+| ------------ | ---------------------------- |
+| Total time   | **3 min 57 sec** (236.9 sec) |
+| Output tiles | 278 tiles                    |
+
+### Memory Workflow Selection
+
+`--max-memory-mb` is not a hard runtime memory cap. It is a conservative workflow-selection threshold.
+
+- `estimated processing size × 5 <= max-memory-mb` selects the in-memory workflow
+- Otherwise, point-tiler falls back to the external sort workflow
+
+This headroom accounts for point buffers, grouping structures, and parallel intermediate allocations that can make actual RSS significantly larger than the raw point data size.
+
+During conversion, temporary intermediate files are generated on disk. In current benchmarks, their peak size is typically around 1.2x to 1.5x the input LAS size, and they are deleted automatically after processing finishes.
+
+### Attributes
+
+At present, 3D Tiles output uses only XYZ and RGB. Other point attributes such as intensity, return number, classification, scan angle, point source ID, and GPS time are ignored during GLB generation.
 
 ### Coordinate Systems
 
