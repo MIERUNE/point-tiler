@@ -1,8 +1,8 @@
 use std::collections::HashMap;
-use std::convert::Infallible;
+use std::collections::BinaryHeap;
 use std::ffi::OsStr;
 use std::fs::File;
-use std::io::{BufReader, BufWriter, Read as _, Write};
+use std::io::{BufReader, BufWriter, ErrorKind, Read as _, Write};
 use std::sync::mpsc;
 use std::thread;
 use std::{
@@ -11,7 +11,6 @@ use std::{
 };
 
 use bitcode::{Decode, Encode};
-use bytemuck::{Pod, Zeroable};
 use chrono::Local;
 use clap::Parser;
 use env_logger::Builder;
@@ -22,7 +21,6 @@ use glob::glob;
 //     par::compress::{ParCompress, ParCompressBuilder},
 // };
 use coordinate_transformer::{EPSG_WGS84_GEOCENTRIC, EPSG_WGS84_GEOGRAPHIC_3D, PointTransformer};
-use itertools::Itertools as _;
 use log::LevelFilter;
 use pcd_exporter::gltf::GlbOptions;
 use pcd_parser::reader::PointReader;
@@ -97,6 +95,8 @@ struct CompactPoint {
     b: u16,
 }
 
+const RUN_RECORD_BYTES: usize = 8 + (8 * 3) + (2 * 3);
+
 impl From<Point> for CompactPoint {
     fn from(point: Point) -> Self {
         Self {
@@ -134,6 +134,95 @@ impl From<CompactPoint> for Point {
         }
     }
 }
+
+fn write_run_file(path: &Path, records: &[(SortKey, CompactPoint)]) -> std::io::Result<()> {
+    let file = File::create(path)?;
+    let mut writer = BufWriter::new(file);
+
+    for (key, point) in records {
+        writer.write_all(&key.tile_id.to_le_bytes())?;
+        writer.write_all(&point.x.to_le_bytes())?;
+        writer.write_all(&point.y.to_le_bytes())?;
+        writer.write_all(&point.z.to_le_bytes())?;
+        writer.write_all(&point.r.to_le_bytes())?;
+        writer.write_all(&point.g.to_le_bytes())?;
+        writer.write_all(&point.b.to_le_bytes())?;
+    }
+
+    writer.flush()?;
+    Ok(())
+}
+
+struct RunFileReader {
+    path: PathBuf,
+    reader: BufReader<File>,
+}
+
+impl RunFileReader {
+    fn open(path: PathBuf) -> std::io::Result<Self> {
+        let file = File::open(&path)?;
+        Ok(Self {
+            path,
+            reader: BufReader::new(file),
+        })
+    }
+
+    fn next_record(&mut self) -> std::io::Result<Option<(SortKey, CompactPoint)>> {
+        let mut record = [0u8; RUN_RECORD_BYTES];
+        match self.reader.read_exact(&mut record) {
+            Ok(()) => {
+                let key = SortKey {
+                    tile_id: u64::from_le_bytes(record[0..8].try_into().unwrap()),
+                };
+                let point = CompactPoint {
+                    x: f64::from_le_bytes(record[8..16].try_into().unwrap()),
+                    y: f64::from_le_bytes(record[16..24].try_into().unwrap()),
+                    z: f64::from_le_bytes(record[24..32].try_into().unwrap()),
+                    r: u16::from_le_bytes(record[32..34].try_into().unwrap()),
+                    g: u16::from_le_bytes(record[34..36].try_into().unwrap()),
+                    b: u16::from_le_bytes(record[36..38].try_into().unwrap()),
+                };
+                Ok(Some((key, point)))
+            }
+            Err(error) if error.kind() == ErrorKind::UnexpectedEof => Ok(None),
+            Err(error) => Err(error),
+        }
+    }
+
+    fn into_path(self) -> PathBuf {
+        self.path
+    }
+}
+
+#[derive(Debug, Clone, Copy)]
+struct HeapItem {
+    key: SortKey,
+    point: CompactPoint,
+    reader_index: usize,
+}
+
+impl Ord for HeapItem {
+    fn cmp(&self, other: &Self) -> std::cmp::Ordering {
+        other
+            .key
+            .cmp(&self.key)
+            .then_with(|| other.reader_index.cmp(&self.reader_index))
+    }
+}
+
+impl PartialOrd for HeapItem {
+    fn partial_cmp(&self, other: &Self) -> Option<std::cmp::Ordering> {
+        Some(self.cmp(other))
+    }
+}
+
+impl PartialEq for HeapItem {
+    fn eq(&self, other: &Self) -> bool {
+        self.key == other.key && self.reader_index == other.reader_index
+    }
+}
+
+impl Eq for HeapItem {}
 
 fn check_and_get_extension(paths: &[PathBuf]) -> Result<Extension, String> {
     let mut extensions = vec![];
@@ -502,7 +591,7 @@ fn export_tiles_to_glb(
     Ok(tile_contents)
 }
 
-#[derive(Debug, Copy, Clone, Ord, PartialOrd, Eq, PartialEq, Pod, Zeroable, Encode, Decode)]
+#[derive(Debug, Copy, Clone, Ord, PartialOrd, Eq, PartialEq, Encode, Decode)]
 #[repr(C)]
 pub struct SortKey {
     pub tile_id: u64,
@@ -527,51 +616,83 @@ impl TileIdMethod {
     }
 }
 
-struct RunFileIterator {
-    files: std::vec::IntoIter<PathBuf>,
-    current: Option<std::vec::IntoIter<(SortKey, CompactPoint)>>,
+fn flush_tile_points(
+    base_path: &Path,
+    tile_id: u64,
+    points: &mut Vec<Point>,
+    disable_decimation: bool,
+) -> std::io::Result<()> {
+    if points.is_empty() {
+        return Ok(());
+    }
+
+    let tile = TileIdMethod::Hilbert.id_to_zxy(tile_id);
+    let tile_points = std::mem::take(points);
+    let tile_points = maybe_decimate_points(tile, tile_points, disable_decimation);
+    write_points_to_tile(base_path, tile, &tile_points)
 }
 
-impl RunFileIterator {
-    fn new(files: Vec<PathBuf>) -> Self {
-        RunFileIterator {
-            files: files.into_iter(),
-            current: None,
+fn merge_shard_run_files(
+    run_files: Vec<PathBuf>,
+    output_base_path: &Path,
+    disable_decimation: bool,
+) -> std::io::Result<()> {
+    let mut readers = Vec::<Option<RunFileReader>>::new();
+    let mut heap = BinaryHeap::<HeapItem>::new();
+
+    for path in run_files {
+        let mut reader = RunFileReader::open(path)?;
+        let reader_index = readers.len();
+        match reader.next_record()? {
+            Some((key, point)) => {
+                readers.push(Some(reader));
+                heap.push(HeapItem {
+                    key,
+                    point,
+                    reader_index,
+                });
+            }
+            None => {
+                let empty_path = reader.into_path();
+                fs::remove_file(empty_path)?;
+                readers.push(None);
+            }
         }
     }
 
-    fn read_run_file(path: PathBuf) -> Result<Vec<(SortKey, CompactPoint)>, Infallible> {
-        let file = File::open(path).unwrap();
-        let mut reader = BufReader::new(file);
-        let mut buffer = Vec::new();
-        reader.read_to_end(&mut buffer).unwrap();
-        let data: Vec<(SortKey, CompactPoint)> = bitcode::decode(&buffer[..]).unwrap();
-        Ok(data)
-    }
-}
+    let mut current_tile_id = None;
+    let mut tile_points = Vec::<Point>::new();
 
-impl Iterator for RunFileIterator {
-    type Item = (SortKey, CompactPoint);
-
-    fn next(&mut self) -> Option<Self::Item> {
-        loop {
-            if let Some(ref mut iter) = self.current
-                && let Some(item) = iter.next()
-            {
-                return Some(item);
+    while let Some(item) = heap.pop() {
+        if current_tile_id != Some(item.key.tile_id) {
+            if let Some(tile_id) = current_tile_id {
+                flush_tile_points(output_base_path, tile_id, &mut tile_points, disable_decimation)?;
             }
+            current_tile_id = Some(item.key.tile_id);
+        }
 
-            match self.files.next() {
-                Some(file) => {
-                    let data = RunFileIterator::read_run_file(file).unwrap();
-                    self.current = Some(data.into_iter());
-                }
+        tile_points.push(Point::from(item.point));
+
+        if let Some(reader) = readers[item.reader_index].as_mut() {
+            match reader.next_record()? {
+                Some((key, point)) => heap.push(HeapItem {
+                    key,
+                    point,
+                    reader_index: item.reader_index,
+                }),
                 None => {
-                    return None;
+                    let exhausted_reader = readers[item.reader_index].take().unwrap();
+                    fs::remove_file(exhausted_reader.into_path())?;
                 }
             }
         }
     }
+
+    if let Some(tile_id) = current_tile_id {
+        flush_tile_points(output_base_path, tile_id, &mut tile_points, disable_decimation)?;
+    }
+
+    Ok(())
 }
 
 fn estimate_total_size(paths: &[PathBuf]) -> u64 {
@@ -927,10 +1048,7 @@ fn external_sort_workflow(
                     shard_z, shard_x, shard_y, current_run_index
                 ));
                 fs::create_dir_all(run_file_path.parent().unwrap()).unwrap();
-                let file = fs::File::create(run_file_path).unwrap();
-                let encoded = bitcode::encode(&keyed_points);
-                let mut writer = BufWriter::new(file);
-                writer.write_all(&encoded).unwrap();
+                write_run_file(&run_file_path, &keyed_points).unwrap();
             }
         }
 
@@ -986,52 +1104,8 @@ fn external_sort_workflow(
                 format_size(shard_run_bytes)
             );
 
-            let tile_id_iter = RunFileIterator::new(run_files);
-            let config =
-                kv_extsort::SortConfig::default().max_chunk_bytes(args.max_memory_mb * 1024 * 1024);
-            let sorted_iter = kv_extsort::sort(
-                tile_id_iter.map(|(key, point)| {
-                    let encoded_point = bitcode::encode(&point);
-                    std::result::Result::<_, Infallible>::Ok((key, encoded_point))
-                }),
-                config,
-            );
-
-            let grouped_iter = sorted_iter.chunk_by(|res| match res {
-                Ok((key, _)) => (false, *key),
-                Err(_) => (true, SortKey { tile_id: 0 }),
-            });
-
             let tmp_tiled_file_dir_path = tempdir().unwrap();
-
-            for ((_, key), group) in &grouped_iter {
-                let points = group
-                    .into_iter()
-                    .map(|r| {
-                        r.map(|(_, p)| {
-                            let point = bitcode::decode::<CompactPoint>(&p).unwrap();
-                            Point::from(point)
-                        })
-                    })
-                    .collect::<Result<Vec<_>, _>>()
-                    .unwrap();
-
-                let tile_id = key.tile_id;
-                let tile = TileIdMethod::Hilbert.id_to_zxy(tile_id);
-                let points = maybe_decimate_points(tile, points, args.disable_decimation);
-
-                let (z, x, y) = tile;
-                let tile_path = tmp_tiled_file_dir_path
-                    .path()
-                    .join(format!("{}/{}/{}.bin", z, x, y));
-
-                fs::create_dir_all(tile_path.parent().unwrap()).unwrap();
-
-                let file = fs::File::create(tile_path).unwrap();
-                let encoded = bitcode::encode(&points);
-                let mut writer = BufWriter::new(file);
-                writer.write_all(&encoded).unwrap();
-            }
+            merge_shard_run_files(run_files, tmp_tiled_file_dir_path.path(), args.disable_decimation)?;
             log_directory_summary(
                 "tile files after shard sort",
                 tmp_tiled_file_dir_path.path(),
@@ -1064,7 +1138,9 @@ fn external_sort_workflow(
             tile_contents_all.extend(tile_contents);
 
             remaining_run_bytes = remaining_run_bytes.saturating_sub(shard_run_bytes);
-            if let Some(shard_run_dir) = shard_run_dir {
+            if let Some(shard_run_dir) = shard_run_dir
+                && shard_run_dir.exists()
+            {
                 fs::remove_dir_all(&shard_run_dir)?;
             }
             log::info!(
@@ -1268,5 +1344,68 @@ mod tests {
 
         assert!(!should_use_in_memory(processing_size, 499));
         assert!(should_use_in_memory(processing_size, 500));
+    }
+
+    #[test]
+    fn merge_shard_run_files_creates_tiles_and_deletes_runs() {
+        let run_dir = tempdir().unwrap();
+        let tile_dir = tempdir().unwrap();
+
+        let tile_a = (18, 10, 20);
+        let tile_b = (18, 10, 21);
+        let tile_a_id = TileIdMethod::Hilbert.zxy_to_id(tile_a.0, tile_a.1, tile_a.2);
+        let tile_b_id = TileIdMethod::Hilbert.zxy_to_id(tile_b.0, tile_b.1, tile_b.2);
+
+        let run_a = run_dir.path().join("run_a.bin");
+        let run_b = run_dir.path().join("run_b.bin");
+
+        write_run_file(
+            &run_a,
+            &[
+                (
+                    SortKey { tile_id: tile_a_id },
+                    CompactPoint::from(point(1.0, 1.0, 1.0)),
+                ),
+                (
+                    SortKey { tile_id: tile_b_id },
+                    CompactPoint::from(point(4.0, 4.0, 4.0)),
+                ),
+            ],
+        )
+        .unwrap();
+        write_run_file(
+            &run_b,
+            &[
+                (
+                    SortKey { tile_id: tile_a_id },
+                    CompactPoint::from(point(2.0, 2.0, 2.0)),
+                ),
+                (
+                    SortKey { tile_id: tile_a_id },
+                    CompactPoint::from(point(3.0, 3.0, 3.0)),
+                ),
+            ],
+        )
+        .unwrap();
+
+        merge_shard_run_files(vec![run_a.clone(), run_b.clone()], tile_dir.path(), true).unwrap();
+
+        let tile_a_points = read_points_from_tile(
+            &tile_dir
+                .path()
+                .join(format!("{}/{}/{}.bin", tile_a.0, tile_a.1, tile_a.2)),
+        )
+        .unwrap();
+        let tile_b_points = read_points_from_tile(
+            &tile_dir
+                .path()
+                .join(format!("{}/{}/{}.bin", tile_b.0, tile_b.1, tile_b.2)),
+        )
+        .unwrap();
+
+        assert_eq!(tile_a_points.len(), 3);
+        assert_eq!(tile_b_points.len(), 1);
+        assert!(!run_a.exists());
+        assert!(!run_b.exists());
     }
 }

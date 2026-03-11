@@ -114,8 +114,6 @@ dependencies = [
  "flate2",
  "glob",
  "gzp",
- "itertools 0.14.0",
- "kv-extsort",
  "log",
  "num_cpus",
  "pcd-core",
@@ -182,20 +180,6 @@ name = "bytemuck"
 version = "1.25.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "c8efb64bd706a16a1bdde310ae86b351e4d21550d98d056f22f8a7f7a2183fec"
-dependencies = [
- "bytemuck_derive",
-]
-
-[[package]]
-name = "bytemuck_derive"
-version = "1.10.2"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "f9abbd1bc6865053c427f7198e6af43bfdedc55ab791faed4fbd361d789575ff"
-dependencies = [
- "proc-macro2",
- "quote",
- "syn",
-]
 
 [[package]]
 name = "byteorder"
@@ -845,20 +829,6 @@ checksum = "7507624b29483431c0ba2d82aece8ca6cdba9382bff4ddd0f7490560c056098d"
 dependencies = [
  "winapi 0.2.8",
  "winapi-build",
-]
-
-[[package]]
-name = "kv-extsort"
-version = "0.1.2"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "3267617ba82b2bc06b0e57a840c2c2a03bb7455bb4c59f0b18fd9cf206c1ce4e"
-dependencies = [
- "bytemuck",
- "crossbeam-channel",
- "log",
- "rayon",
- "tempfile",
- "thiserror 2.0.18",
 ]
 
 [[package]]
