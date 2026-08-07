@@ -12,7 +12,7 @@ use std::{
 
 use bitcode::{Decode, Encode};
 use chrono::Local;
-use clap::Parser;
+use clap::{Parser, ValueEnum};
 use env_logger::Builder;
 use glob::glob;
 // use gzp::MgzipSyncReader;
@@ -24,6 +24,7 @@ use coordinate_transformer::{EPSG_WGS84_GEOCENTRIC, EPSG_WGS84_GEOGRAPHIC_3D, Po
 use log::LevelFilter;
 use pcd_exporter::gltf::GlbOptions;
 use pcd_parser::reader::PointReader;
+use pcd_parser::reader::AttributeSelection;
 use pcd_parser::reader::csv::CsvPointReader;
 use pcd_parser::reader::las::LasPointReader;
 use rayon::iter::{IntoParallelIterator as _, IntoParallelRefIterator as _, ParallelIterator as _};
@@ -81,6 +82,47 @@ struct Cli {
 
     #[arg(long)]
     disable_decimation: bool,
+
+    /// Extra point attributes to read and embed as GLB metadata.
+    /// Accepts a comma-separated list and/or repeated flags, e.g.
+    /// `--extra-fields classification,intensity`. Ignored when
+    /// `--all-extra-fields` is set. When neither is set, no extra
+    /// attributes are included.
+    #[arg(long, value_enum, value_delimiter = ',', num_args = 1..)]
+    extra_fields: Vec<ExtraField>,
+
+    /// Read and embed all supported extra point attributes. Overrides
+    /// `--extra-fields`.
+    #[arg(long)]
+    all_extra_fields: bool,
+}
+
+#[derive(ValueEnum, Debug, Clone, Copy, PartialEq, Eq)]
+enum ExtraField {
+    Intensity,
+    ReturnNumber,
+    Classification,
+    ScannerChannel,
+    ScanAngle,
+    UserData,
+    PointSourceId,
+    GpsTime,
+}
+
+impl Cli {
+    fn attribute_selection(&self) -> AttributeSelection {
+        let selected = |field| self.all_extra_fields || self.extra_fields.contains(&field);
+        AttributeSelection {
+            intensity: selected(ExtraField::Intensity),
+            return_number: selected(ExtraField::ReturnNumber),
+            classification: selected(ExtraField::Classification),
+            scanner_channel: selected(ExtraField::ScannerChannel),
+            scan_angle: selected(ExtraField::ScanAngle),
+            user_data: selected(ExtraField::UserData),
+            point_source_id: selected(ExtraField::PointSourceId),
+            gps_time: selected(ExtraField::GpsTime),
+        }
+    }
 }
 
 const IN_MEMORY_WORKFLOW_MULTIPLIER: u64 = 5;
@@ -93,12 +135,52 @@ struct CompactPoint {
     r: u16,
     g: u16,
     b: u16,
+    attribute_mask: u8,
+    intensity: u16,
+    return_number: u8,
+    classification: u8,
+    scanner_channel: u8,
+    scan_angle: f32,
+    user_data: u8,
+    point_source_id: u16,
+    gps_time: f64,
 }
 
-const RUN_RECORD_BYTES: usize = 8 + (8 * 3) + (2 * 3);
+const ATTR_INTENSITY: u8 = 1 << 0;
+const ATTR_RETURN_NUMBER: u8 = 1 << 1;
+const ATTR_CLASSIFICATION: u8 = 1 << 2;
+const ATTR_SCANNER_CHANNEL: u8 = 1 << 3;
+const ATTR_SCAN_ANGLE: u8 = 1 << 4;
+const ATTR_USER_DATA: u8 = 1 << 5;
+const ATTR_POINT_SOURCE_ID: u8 = 1 << 6;
+const ATTR_GPS_TIME: u8 = 1 << 7;
+
+const RUN_RECORD_BYTES: usize = 8 // tile_id (u64)
+    + 8 * 3 // x, y, z (f64)
+    + 2 * 3 // r, g, b (u16)
+    + 1 // attribute_mask (u8)
+    + 2 // intensity (u16)
+    + 1 // return_number (u8)
+    + 1 // classification (u8)
+    + 1 // scanner_channel (u8)
+    + 4 // scan_angle (f32)
+    + 1 // user_data (u8)
+    + 2 // point_source_id (u16)
+    + 8; // gps_time (f64)
 
 impl From<Point> for CompactPoint {
     fn from(point: Point) -> Self {
+        let attrs = &point.attributes;
+        let flag = |present: bool, bit: u8| if present { bit } else { 0 };
+        let attribute_mask = flag(attrs.intensity.is_some(), ATTR_INTENSITY)
+            | flag(attrs.return_number.is_some(), ATTR_RETURN_NUMBER)
+            | flag(attrs.classification.is_some(), ATTR_CLASSIFICATION)
+            | flag(attrs.scanner_channel.is_some(), ATTR_SCANNER_CHANNEL)
+            | flag(attrs.scan_angle.is_some(), ATTR_SCAN_ANGLE)
+            | flag(attrs.user_data.is_some(), ATTR_USER_DATA)
+            | flag(attrs.point_source_id.is_some(), ATTR_POINT_SOURCE_ID)
+            | flag(attrs.gps_time.is_some(), ATTR_GPS_TIME);
+
         Self {
             x: point.x,
             y: point.y,
@@ -106,6 +188,15 @@ impl From<Point> for CompactPoint {
             r: point.color.r,
             g: point.color.g,
             b: point.color.b,
+            attribute_mask,
+            intensity: point.attributes.intensity.unwrap_or_default(),
+            return_number: point.attributes.return_number.unwrap_or_default(),
+            classification: point.attributes.classification.unwrap_or_default(),
+            scanner_channel: point.attributes.scanner_channel.unwrap_or_default(),
+            scan_angle: point.attributes.scan_angle.unwrap_or_default(),
+            user_data: point.attributes.user_data.unwrap_or_default(),
+            point_source_id: point.attributes.point_source_id.unwrap_or_default(),
+            gps_time: point.attributes.gps_time.unwrap_or_default(),
         }
     }
 }
@@ -122,14 +213,18 @@ impl From<CompactPoint> for Point {
                 b: point.b,
             },
             attributes: pcd_core::pointcloud::point::PointAttributes {
-                intensity: None,
-                return_number: None,
-                classification: None,
-                scanner_channel: None,
-                scan_angle: None,
-                user_data: None,
-                point_source_id: None,
-                gps_time: None,
+                intensity: (point.attribute_mask & ATTR_INTENSITY != 0).then_some(point.intensity),
+                return_number: (point.attribute_mask & ATTR_RETURN_NUMBER != 0)
+                    .then_some(point.return_number),
+                classification: (point.attribute_mask & ATTR_CLASSIFICATION != 0)
+                    .then_some(point.classification),
+                scanner_channel: (point.attribute_mask & ATTR_SCANNER_CHANNEL != 0)
+                    .then_some(point.scanner_channel),
+                scan_angle: (point.attribute_mask & ATTR_SCAN_ANGLE != 0).then_some(point.scan_angle),
+                user_data: (point.attribute_mask & ATTR_USER_DATA != 0).then_some(point.user_data),
+                point_source_id: (point.attribute_mask & ATTR_POINT_SOURCE_ID != 0)
+                    .then_some(point.point_source_id),
+                gps_time: (point.attribute_mask & ATTR_GPS_TIME != 0).then_some(point.gps_time),
             },
         }
     }
@@ -147,6 +242,15 @@ fn write_run_file(path: &Path, records: &[(SortKey, CompactPoint)]) -> std::io::
         writer.write_all(&point.r.to_le_bytes())?;
         writer.write_all(&point.g.to_le_bytes())?;
         writer.write_all(&point.b.to_le_bytes())?;
+        writer.write_all(&point.attribute_mask.to_le_bytes())?;
+        writer.write_all(&point.intensity.to_le_bytes())?;
+        writer.write_all(&point.return_number.to_le_bytes())?;
+        writer.write_all(&point.classification.to_le_bytes())?;
+        writer.write_all(&point.scanner_channel.to_le_bytes())?;
+        writer.write_all(&point.scan_angle.to_le_bytes())?;
+        writer.write_all(&point.user_data.to_le_bytes())?;
+        writer.write_all(&point.point_source_id.to_le_bytes())?;
+        writer.write_all(&point.gps_time.to_le_bytes())?;
     }
 
     writer.flush()?;
@@ -181,6 +285,15 @@ impl RunFileReader {
                     r: u16::from_le_bytes(record[32..34].try_into().unwrap()),
                     g: u16::from_le_bytes(record[34..36].try_into().unwrap()),
                     b: u16::from_le_bytes(record[36..38].try_into().unwrap()),
+                    attribute_mask: u8::from_le_bytes(record[38..39].try_into().unwrap()),
+                    intensity: u16::from_le_bytes(record[39..41].try_into().unwrap()),
+                    return_number: u8::from_le_bytes(record[41..42].try_into().unwrap()),
+                    classification: u8::from_le_bytes(record[42..43].try_into().unwrap()),
+                    scanner_channel: u8::from_le_bytes(record[43..44].try_into().unwrap()),
+                    scan_angle: f32::from_le_bytes(record[44..48].try_into().unwrap()),
+                    user_data: u8::from_le_bytes(record[48..49].try_into().unwrap()),
+                    point_source_id: u16::from_le_bytes(record[49..51].try_into().unwrap()),
+                    gps_time: f64::from_le_bytes(record[51..59].try_into().unwrap()),
                 };
                 Ok(Some((key, point)))
             }
@@ -786,6 +899,7 @@ fn in_memory_workflow(
 
     let epsg_in = args.input_epsg;
     let epsg_out = args.output_epsg;
+    let selection = args.attribute_selection();
 
     // Read multiple files in parallel
     let mut all_points: Vec<Point> = input_files
@@ -793,10 +907,10 @@ fn in_memory_workflow(
         .flat_map(|file| {
             let mut reader: Box<dyn PointReader> = match extension {
                 Extension::Las | Extension::Laz => {
-                    Box::new(LasPointReader::new(vec![file.clone()]).unwrap())
+                    Box::new(LasPointReader::new(vec![file.clone()], selection).unwrap())
                 }
                 Extension::Csv | Extension::Txt => {
-                    Box::new(CsvPointReader::new(vec![file.clone()]).unwrap())
+                    Box::new(CsvPointReader::new(vec![file.clone()], selection).unwrap())
                 }
             };
 
@@ -963,6 +1077,7 @@ fn external_sort_workflow(
         let extension = check_and_get_extension(&input_files).unwrap();
         let epsg_in = args.input_epsg;
         let epsg_out = args.output_epsg;
+        let selection = args.attribute_selection();
 
         log::info!("memory budget: {}", format_size(max_memory_mb_bytes as u64));
         log::info!("reader chunk target: {}", format_size(one_chunk_mem as u64));
@@ -988,10 +1103,10 @@ fn external_sort_workflow(
                 let mut buffer = Vec::with_capacity(default_chunk_points_len);
                 let mut reader: Box<dyn PointReader> = match extension_copy {
                     Extension::Las | Extension::Laz => {
-                        Box::new(LasPointReader::new(chunk).unwrap())
+                        Box::new(LasPointReader::new(chunk, selection).unwrap())
                     }
                     Extension::Csv | Extension::Txt => {
-                        Box::new(CsvPointReader::new(chunk).unwrap())
+                        Box::new(CsvPointReader::new(chunk, selection).unwrap())
                     }
                 };
 
@@ -1236,6 +1351,8 @@ fn main() -> std::io::Result<()> {
     log::info!("gzip compress: {}", args.gzip_compress);
     log::info!("meshopt: {}", args.meshopt);
     log::info!("disable decimation: {}", args.disable_decimation);
+    log::info!("all extra fields: {}", args.all_extra_fields);
+    log::info!("extra fields: {:?}", args.extra_fields);
 
     let start = std::time::Instant::now();
 
@@ -1407,5 +1524,57 @@ mod tests {
         assert_eq!(tile_b_points.len(), 1);
         assert!(!run_a.exists());
         assert!(!run_b.exists());
+    }
+
+    #[test]
+    fn compact_point_round_trip_preserves_attributes() {
+        let original = Point {
+            x: 100.0,
+            y: 200.0,
+            z: 300.0,
+            color: Color {
+                r: 1000,
+                g: 2000,
+                b: 3000,
+            },
+            attributes: PointAttributes {
+                intensity: Some(65000),
+                return_number: Some(3),
+                classification: Some(7),
+                scanner_channel: Some(2),
+                scan_angle: Some(-12.5),
+                user_data: Some(21),
+                point_source_id: Some(1234),
+                gps_time: Some(9876.5),
+            },
+        };
+
+        let restored = Point::from(CompactPoint::from(original.clone()));
+        assert_eq!(restored.x, original.x);
+        assert_eq!(restored.y, original.y);
+        assert_eq!(restored.z, original.z);
+        assert_eq!(restored.color.r, original.color.r);
+        assert_eq!(restored.color.g, original.color.g);
+        assert_eq!(restored.color.b, original.color.b);
+        assert_eq!(restored.attributes.intensity, original.attributes.intensity);
+        assert_eq!(
+            restored.attributes.return_number,
+            original.attributes.return_number
+        );
+        assert_eq!(
+            restored.attributes.classification,
+            original.attributes.classification
+        );
+        assert_eq!(
+            restored.attributes.scanner_channel,
+            original.attributes.scanner_channel
+        );
+        assert_eq!(restored.attributes.scan_angle, original.attributes.scan_angle);
+        assert_eq!(restored.attributes.user_data, original.attributes.user_data);
+        assert_eq!(
+            restored.attributes.point_source_id,
+            original.attributes.point_source_id
+        );
+        assert_eq!(restored.attributes.gps_time, original.attributes.gps_time);
     }
 }

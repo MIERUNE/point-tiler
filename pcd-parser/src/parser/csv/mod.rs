@@ -20,6 +20,46 @@ impl ParserProvider for CsvParserProvider {
     }
 }
 
+fn parse_optional_numeric<T>(
+    record: &csv::StringRecord,
+    field_mapping: &HashMap<String, usize>,
+    field_name: &str,
+) -> Result<Option<T>, Box<dyn Error>>
+where
+    T: TryFrom<i64>,
+    <T as TryFrom<i64>>::Error: Error + Send + Sync + 'static,
+{
+    match parse_optional_field(record, field_mapping, field_name) {
+        Some(v) => {
+            let parsed = v.parse::<f64>()?.floor() as i64;
+            Ok(Some(T::try_from(parsed)?))
+        }
+        None => Ok(None),
+    }
+}
+
+fn parse_optional_f32(
+    record: &csv::StringRecord,
+    field_mapping: &HashMap<String, usize>,
+    field_name: &str,
+) -> Result<Option<f32>, Box<dyn Error>> {
+    match parse_optional_field(record, field_mapping, field_name) {
+        Some(v) => Ok(Some(v.parse::<f32>()?)),
+        None => Ok(None),
+    }
+}
+
+fn parse_optional_f64(
+    record: &csv::StringRecord,
+    field_mapping: &HashMap<String, usize>,
+    field_name: &str,
+) -> Result<Option<f64>, Box<dyn Error>> {
+    match parse_optional_field(record, field_mapping, field_name) {
+        Some(v) => Ok(Some(v.parse::<f64>()?)),
+        None => Ok(None),
+    }
+}
+
 pub struct CsvParser {
     pub filenames: Vec<PathBuf>,
     pub epsg: EpsgCode,
@@ -86,43 +126,32 @@ impl Parser for CsvParser {
 
                 let color = Color { r, g, b };
 
-                // TODO: 将来的に実装する
                 let attributes = PointAttributes {
-                    intensity: None,
-                    return_number: None,
-                    classification: None,
-                    scanner_channel: None,
-                    scan_angle: None,
-                    user_data: None,
-                    point_source_id: None,
-                    gps_time: None,
+                    intensity: parse_optional_numeric::<u16>(&record, &field_mapping, "intensity")?,
+                    return_number: parse_optional_numeric::<u8>(
+                        &record,
+                        &field_mapping,
+                        "return_number",
+                    )?,
+                    classification: parse_optional_numeric::<u8>(
+                        &record,
+                        &field_mapping,
+                        "classification",
+                    )?,
+                    scanner_channel: parse_optional_numeric::<u8>(
+                        &record,
+                        &field_mapping,
+                        "scanner_channel",
+                    )?,
+                    scan_angle: parse_optional_f32(&record, &field_mapping, "scan_angle")?,
+                    user_data: parse_optional_numeric::<u8>(&record, &field_mapping, "user_data")?,
+                    point_source_id: parse_optional_numeric::<u16>(
+                        &record,
+                        &field_mapping,
+                        "point_source_id",
+                    )?,
+                    gps_time: parse_optional_f64(&record, &field_mapping, "gps_time")?,
                 };
-                // let attributes = PointAttributes {
-                //     intensity: parse_optional_field(&record, &field_mapping, "intensity")
-                //         .unwrap_or(None),
-                //     return_number: parse_optional_field(&record, &field_mapping, "return_number")
-                //         .unwrap_or(None),
-                //     classification: get_field_value(&record, &field_mapping, "classification")
-                //         .map(|v| v.to_string()),
-                //     scanner_channel: parse_optional_field(
-                //         &record,
-                //         &field_mapping,
-                //         "scanner_channel",
-                //     )
-                //     .unwrap_or(None),
-                //     scan_angle: parse_optional_field(&record, &field_mapping, "scan_angle")
-                //         .unwrap_or(None),
-                //     user_data: parse_optional_field(&record, &field_mapping, "user_data")
-                //         .unwrap_or(None),
-                //     point_source_id: parse_optional_field(
-                //         &record,
-                //         &field_mapping,
-                //         "point_source_id",
-                //     )
-                //     .unwrap_or(None),
-                //     gps_time: parse_optional_field(&record, &field_mapping, "gps_time")
-                //         .unwrap_or(None),
-                // };
 
                 let point = Point {
                     x,

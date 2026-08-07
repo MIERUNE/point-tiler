@@ -4,6 +4,10 @@ use byteorder::{ByteOrder as _, LittleEndian};
 use cesiumtiles_gltf_json::{
     Accessor, AccessorType, Buffer, BufferExtMeshoptCompression, BufferExtensions, BufferView,
     BufferViewTarget, ComponentType, Gltf, Mesh, MeshPrimitive, Node, Scene,
+    extensions::{
+        gltf::ext_structural_metadata as gltf_structural_metadata,
+        mesh::{MeshPrimitive as MeshPrimitiveExtensions, ext_mesh_features},
+    },
     extensions::buffer_view::{
         BufferViewExtensions, ExtMeshoptCompression, MeshoptCompressionFilter,
         MeshoptCompressionMode,
@@ -87,6 +91,20 @@ struct VertexBufferInfo {
     scale: Option<[f64; 3]>,
     /// Whether KHR_mesh_quantization extension is needed
     needs_quantization_extension: bool,
+}
+
+#[derive(Debug, Clone)]
+struct MetadataProperty {
+    name: &'static str,
+    class_property: gltf_structural_metadata::ClassProperty,
+    values: Vec<u8>,
+    alignment: usize,
+}
+
+#[derive(Debug, Clone)]
+struct StructuralMetadataInfo {
+    feature_count: u32,
+    properties: Vec<MetadataProperty>,
 }
 
 fn build_vertex_buffer_f32(points: &PointCloud) -> Result<VertexBufferInfo, Box<dyn Error>> {
@@ -210,6 +228,196 @@ fn build_vertex_buffer_quantized(points: &PointCloud) -> Result<VertexBufferInfo
     })
 }
 
+fn build_structural_metadata(points: &PointCloud) -> Option<StructuralMetadataInfo> {
+    let feature_count = points.points.len() as u32;
+    if feature_count == 0 {
+        return None;
+    }
+
+    // Attribute presence is uniform across a file (driven by the CLI selection),
+    // so the first point tells us which properties exist. This lets us skip the
+    // accumulation loop entirely when nothing is selected, and avoid allocating
+    // buffers for absent fields.
+    let first = &points.points[0].attributes;
+    let has_intensity = first.intensity.is_some();
+    let has_return_number = first.return_number.is_some();
+    let has_classification = first.classification.is_some();
+    let has_scanner_channel = first.scanner_channel.is_some();
+    let has_scan_angle = first.scan_angle.is_some();
+    let has_user_data = first.user_data.is_some();
+    let has_point_source_id = first.point_source_id.is_some();
+    let has_gps_time = first.gps_time.is_some();
+
+    if !(has_intensity
+        || has_return_number
+        || has_classification
+        || has_scanner_channel
+        || has_scan_angle
+        || has_user_data
+        || has_point_source_id
+        || has_gps_time)
+    {
+        return None;
+    }
+
+    let n = points.points.len();
+    let mut intensity = Vec::with_capacity(if has_intensity { n * 2 } else { 0 });
+    let mut return_number = Vec::with_capacity(if has_return_number { n } else { 0 });
+    let mut classification = Vec::with_capacity(if has_classification { n } else { 0 });
+    let mut scanner_channel = Vec::with_capacity(if has_scanner_channel { n } else { 0 });
+    let mut scan_angle = Vec::with_capacity(if has_scan_angle { n * 4 } else { 0 });
+    let mut user_data = Vec::with_capacity(if has_user_data { n } else { 0 });
+    let mut point_source_id = Vec::with_capacity(if has_point_source_id { n * 2 } else { 0 });
+    let mut gps_time = Vec::with_capacity(if has_gps_time { n * 8 } else { 0 });
+
+    for point in &points.points {
+        let attrs = &point.attributes;
+
+        if has_intensity {
+            intensity.extend_from_slice(&attrs.intensity.unwrap_or_default().to_le_bytes());
+        }
+        if has_return_number {
+            return_number.push(attrs.return_number.unwrap_or_default());
+        }
+        if has_classification {
+            classification.push(attrs.classification.unwrap_or_default());
+        }
+        if has_scanner_channel {
+            scanner_channel.push(attrs.scanner_channel.unwrap_or_default());
+        }
+        if has_scan_angle {
+            scan_angle.extend_from_slice(&attrs.scan_angle.unwrap_or_default().to_le_bytes());
+        }
+        if has_user_data {
+            user_data.push(attrs.user_data.unwrap_or_default());
+        }
+        if has_point_source_id {
+            point_source_id
+                .extend_from_slice(&attrs.point_source_id.unwrap_or_default().to_le_bytes());
+        }
+        if has_gps_time {
+            gps_time.extend_from_slice(&attrs.gps_time.unwrap_or_default().to_le_bytes());
+        }
+    }
+
+    let mut properties = Vec::new();
+    if has_intensity {
+        properties.push(MetadataProperty {
+            name: "intensity",
+            class_property: gltf_structural_metadata::ClassProperty {
+                type_: gltf_structural_metadata::ClassPropertyType::Scalar,
+                component_type: Some(gltf_structural_metadata::ClassPropertyComponentType::Uint16),
+                ..Default::default()
+            },
+            values: intensity,
+            alignment: 2,
+        });
+    }
+    if has_return_number {
+        properties.push(MetadataProperty {
+            name: "return_number",
+            class_property: gltf_structural_metadata::ClassProperty {
+                type_: gltf_structural_metadata::ClassPropertyType::Scalar,
+                component_type: Some(gltf_structural_metadata::ClassPropertyComponentType::Uint8),
+                ..Default::default()
+            },
+            values: return_number,
+            alignment: 1,
+        });
+    }
+    if has_classification {
+        properties.push(MetadataProperty {
+            name: "classification",
+            class_property: gltf_structural_metadata::ClassProperty {
+                type_: gltf_structural_metadata::ClassPropertyType::Scalar,
+                component_type: Some(gltf_structural_metadata::ClassPropertyComponentType::Uint8),
+                ..Default::default()
+            },
+            values: classification,
+            alignment: 1,
+        });
+    }
+    if has_scanner_channel {
+        properties.push(MetadataProperty {
+            name: "scanner_channel",
+            class_property: gltf_structural_metadata::ClassProperty {
+                type_: gltf_structural_metadata::ClassPropertyType::Scalar,
+                component_type: Some(gltf_structural_metadata::ClassPropertyComponentType::Uint8),
+                ..Default::default()
+            },
+            values: scanner_channel,
+            alignment: 1,
+        });
+    }
+    if has_scan_angle {
+        properties.push(MetadataProperty {
+            name: "scan_angle",
+            class_property: gltf_structural_metadata::ClassProperty {
+                type_: gltf_structural_metadata::ClassPropertyType::Scalar,
+                component_type: Some(gltf_structural_metadata::ClassPropertyComponentType::Float32),
+                ..Default::default()
+            },
+            values: scan_angle,
+            alignment: 4,
+        });
+    }
+    if has_user_data {
+        properties.push(MetadataProperty {
+            name: "user_data",
+            class_property: gltf_structural_metadata::ClassProperty {
+                type_: gltf_structural_metadata::ClassPropertyType::Scalar,
+                component_type: Some(gltf_structural_metadata::ClassPropertyComponentType::Uint8),
+                ..Default::default()
+            },
+            values: user_data,
+            alignment: 1,
+        });
+    }
+    if has_point_source_id {
+        properties.push(MetadataProperty {
+            name: "point_source_id",
+            class_property: gltf_structural_metadata::ClassProperty {
+                type_: gltf_structural_metadata::ClassPropertyType::Scalar,
+                component_type: Some(gltf_structural_metadata::ClassPropertyComponentType::Uint16),
+                ..Default::default()
+            },
+            values: point_source_id,
+            alignment: 2,
+        });
+    }
+    if has_gps_time {
+        properties.push(MetadataProperty {
+            name: "gps_time",
+            class_property: gltf_structural_metadata::ClassProperty {
+                type_: gltf_structural_metadata::ClassPropertyType::Scalar,
+                component_type: Some(gltf_structural_metadata::ClassPropertyComponentType::Float64),
+                ..Default::default()
+            },
+            values: gps_time,
+            alignment: 8,
+        });
+    }
+
+    if properties.is_empty() {
+        None
+    } else {
+        Some(StructuralMetadataInfo {
+            feature_count,
+            properties,
+        })
+    }
+}
+
+fn append_aligned_bytes(target: &mut Vec<u8>, data: &[u8], alignment: usize) -> (u32, u32) {
+    let pad = (alignment - (target.len() % alignment)) % alignment;
+    if pad > 0 {
+        target.extend(vec![0u8; pad]);
+    }
+    let offset = target.len() as u32;
+    target.extend_from_slice(data);
+    (offset, data.len() as u32)
+}
+
 /// Assemble a GLB from vertex buffer info, optionally applying meshopt compression.
 ///
 /// When `meshopt` is true, uses a 2-buffer layout:
@@ -219,10 +427,11 @@ fn build_vertex_buffer_quantized(points: &PointCloud) -> Result<VertexBufferInfo
 fn assemble_glb<'a>(
     info: VertexBufferInfo,
     meshopt: bool,
+    metadata: Option<StructuralMetadataInfo>,
 ) -> Result<cesiumtiles_gltf::glb::Glb<'a>, Box<dyn Error>> {
     let uncompressed_len = info.bytes.len() as u32;
 
-    let (gltf_buffers, gltf_buffer_views, bin_content) = if meshopt {
+    let (mut gltf_buffers, mut gltf_buffer_views, mut bin_content) = if meshopt {
         let compressed = encode_vertex_buffer_v0(&info.bytes, info.vertex_count, info.byte_stride)?;
         let compressed_len = compressed.len() as u32;
 
@@ -287,6 +496,54 @@ fn assemble_glb<'a>(
         (buffers, buffer_views, info.bytes)
     };
 
+    let mut root_extensions = None;
+
+    if let Some(metadata) = metadata {
+        let mut class = gltf_structural_metadata::Class::default();
+        let mut property_table = gltf_structural_metadata::PropertyTable {
+            class: "point".to_string(),
+            count: metadata.feature_count,
+            ..Default::default()
+        };
+
+        for property in metadata.properties {
+            let (byte_offset, byte_length) =
+                append_aligned_bytes(&mut bin_content, &property.values, property.alignment);
+
+            gltf_buffer_views.push(BufferView {
+                name: Some(format!("metadata_{}", property.name)),
+                buffer: 0,
+                byte_offset,
+                byte_length,
+                ..Default::default()
+            });
+            let values_buffer_view = (gltf_buffer_views.len() - 1) as u32;
+
+            class
+                .properties
+                .insert(property.name.to_string(), property.class_property);
+            property_table.properties.insert(
+                property.name.to_string(),
+                gltf_structural_metadata::PropertyTableProperty {
+                    values: values_buffer_view,
+                    ..Default::default()
+                },
+            );
+        }
+
+        gltf_buffers[0].byte_length = bin_content.len() as u32;
+
+        root_extensions = Some(gltf_structural_metadata::ExtStructuralMetadata {
+            schema: Some(gltf_structural_metadata::Schema {
+                id: "point_tiler_attributes".to_string(),
+                classes: HashMap::from([("point".to_string(), class)]),
+                ..Default::default()
+            }),
+            property_tables: Some(vec![property_table]),
+            ..Default::default()
+        });
+    }
+
     let gltf_accessors = vec![
         Accessor {
             name: Some("positions".to_string()),
@@ -311,6 +568,18 @@ fn assemble_glb<'a>(
         },
     ];
 
+    let primitive_extensions = root_extensions.as_ref().map(|_| MeshPrimitiveExtensions {
+        ext_mesh_features: Some(ext_mesh_features::ExtMeshFeatures {
+            feature_ids: vec![ext_mesh_features::FeatureId {
+                feature_count: info.vertex_count as u32,
+                property_table: Some(0),
+                ..Default::default()
+            }],
+            ..Default::default()
+        }),
+        ..Default::default()
+    });
+
     let gltf_meshes = vec![Mesh {
         primitives: vec![MeshPrimitive {
             attributes: HashMap::from_iter(vec![
@@ -318,6 +587,7 @@ fn assemble_glb<'a>(
                 ("COLOR_0".to_string(), 1),
             ]),
             mode: cesiumtiles_gltf_json::PrimitiveMode::Points,
+            extensions: primitive_extensions,
             ..Default::default()
         }],
         ..Default::default()
@@ -332,6 +602,12 @@ fn assemble_glb<'a>(
     if meshopt {
         extensions_used.push("EXT_meshopt_compression".to_string());
         extensions_required.push("EXT_meshopt_compression".to_string());
+    }
+    if root_extensions.is_some() {
+        extensions_used.push("EXT_structural_metadata".to_string());
+        extensions_required.push("EXT_structural_metadata".to_string());
+        extensions_used.push("EXT_mesh_features".to_string());
+        extensions_required.push("EXT_mesh_features".to_string());
     }
 
     let mut node = Node {
@@ -355,6 +631,10 @@ fn assemble_glb<'a>(
         buffers: gltf_buffers,
         extensions_used,
         extensions_required,
+        extensions: root_extensions.map(|ext| cesiumtiles_gltf_json::extensions::gltf::Gltf {
+            ext_structural_metadata: Some(ext),
+            others: HashMap::new(),
+        }),
         ..Default::default()
     };
 
@@ -368,12 +648,13 @@ pub fn generate_glb_with_options<'a>(
     points: PointCloud,
     options: &GlbOptions,
 ) -> Result<cesiumtiles_gltf::glb::Glb<'a>, Box<dyn Error>> {
+    let metadata = build_structural_metadata(&points);
     let info = if options.quantize {
         build_vertex_buffer_quantized(&points)?
     } else {
         build_vertex_buffer_f32(&points)?
     };
-    assemble_glb(info, options.meshopt)
+    assemble_glb(info, options.meshopt, metadata)
 }
 
 #[cfg(test)]
@@ -447,6 +728,58 @@ mod tests {
             ],
             metadata: Metadata {
                 point_count: 3,
+                offset: [10.0, 20.0, 30.0],
+                ..Default::default()
+            },
+        }
+    }
+
+    fn make_test_points_with_attributes() -> PointCloud {
+        PointCloud {
+            points: vec![
+                Point {
+                    x: 10.0,
+                    y: 20.0,
+                    z: 30.0,
+                    color: Color {
+                        r: 65535,
+                        g: 0,
+                        b: 0,
+                    },
+                    attributes: PointAttributes {
+                        intensity: Some(1000),
+                        return_number: Some(1),
+                        classification: Some(2),
+                        scanner_channel: Some(0),
+                        scan_angle: Some(1.5),
+                        user_data: Some(7),
+                        point_source_id: Some(42),
+                        gps_time: Some(10.25),
+                    },
+                },
+                Point {
+                    x: 11.0,
+                    y: 21.0,
+                    z: 31.0,
+                    color: Color {
+                        r: 0,
+                        g: 65535,
+                        b: 0,
+                    },
+                    attributes: PointAttributes {
+                        intensity: Some(2000),
+                        return_number: Some(2),
+                        classification: Some(6),
+                        scanner_channel: Some(1),
+                        scan_angle: Some(-3.0),
+                        user_data: Some(8),
+                        point_source_id: Some(43),
+                        gps_time: Some(11.5),
+                    },
+                },
+            ],
+            metadata: Metadata {
+                point_count: 2,
                 offset: [10.0, 20.0, 30.0],
                 ..Default::default()
             },
@@ -540,6 +873,46 @@ mod tests {
 
         // BIN: 3 vertices * 12 bytes
         assert_eq!(glb.bin.as_ref().unwrap().len(), 3 * 12);
+    }
+
+    #[test]
+    fn test_generate_glb_with_structural_metadata() {
+        let points = make_test_points_with_attributes();
+        let glb = generate_glb_with_options(points, &GlbOptions::default()).unwrap();
+        let json = parse_glb_json(&glb);
+
+        let ext_used: Vec<&str> = json["extensionsUsed"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|v| v.as_str().unwrap())
+            .collect();
+        assert!(ext_used.contains(&"EXT_structural_metadata"));
+        assert!(ext_used.contains(&"EXT_mesh_features"));
+
+        let schema_props = &json["extensions"]["EXT_structural_metadata"]["schema"]["classes"]["point"]
+            ["properties"];
+        for key in [
+            "intensity",
+            "return_number",
+            "classification",
+            "scanner_channel",
+            "scan_angle",
+            "user_data",
+            "point_source_id",
+            "gps_time",
+        ] {
+            assert!(schema_props.get(key).is_some(), "missing schema property: {key}");
+        }
+
+        let mesh_ext = &json["meshes"][0]["primitives"][0]["extensions"]["EXT_mesh_features"];
+        assert_eq!(mesh_ext["featureIds"][0]["featureCount"], 2);
+        assert_eq!(mesh_ext["featureIds"][0]["propertyTable"], 0);
+
+        let property_table = &json["extensions"]["EXT_structural_metadata"]["propertyTables"][0];
+        assert_eq!(property_table["count"], 2);
+        let property_table_props = property_table["properties"].as_object().unwrap();
+        assert_eq!(property_table_props.len(), 8);
     }
 
     #[test]

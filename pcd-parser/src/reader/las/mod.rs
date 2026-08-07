@@ -7,20 +7,22 @@ use std::{
 use las::Reader;
 use pcd_core::pointcloud::point::{Color, Point, PointAttributes};
 
-use super::PointReader;
+use super::{AttributeSelection, PointReader};
 
 pub struct LasPointReader {
     pub files: Vec<PathBuf>,
     pub current_file_index: usize,
     pub current_reader: Option<Reader>,
+    pub selection: AttributeSelection,
 }
 
 impl LasPointReader {
-    pub fn new(files: Vec<PathBuf>) -> io::Result<Self> {
+    pub fn new(files: Vec<PathBuf>, selection: AttributeSelection) -> io::Result<Self> {
         Ok(Self {
             files,
             current_file_index: 0,
             current_reader: None,
+            selection,
         })
     }
 
@@ -47,7 +49,7 @@ impl LasPointReader {
         }
     }
 
-    pub fn convert_las_point(las_point: las::Point) -> Point {
+    pub fn convert_las_point(las_point: las::Point, selection: AttributeSelection) -> Point {
         let color = las_point
             .color
             .map(|c| Color {
@@ -62,14 +64,24 @@ impl LasPointReader {
             });
 
         let attributes = PointAttributes {
-            intensity: Some(las_point.intensity),
-            return_number: Some(las_point.return_number),
-            classification: None,
-            scanner_channel: Some(las_point.user_data),
-            scan_angle: Some(las_point.scan_angle),
-            user_data: Some(las_point.user_data),
-            point_source_id: Some(las_point.point_source_id),
-            gps_time: Some(las_point.gps_time.unwrap_or(0.0)),
+            intensity: selection.intensity.then_some(las_point.intensity),
+            return_number: selection.return_number.then_some(las_point.return_number),
+            classification: selection
+                .classification
+                .then(|| u8::from(las_point.classification)),
+            scanner_channel: selection
+                .scanner_channel
+                .then_some(las_point.scanner_channel),
+            scan_angle: selection.scan_angle.then_some(las_point.scan_angle),
+            user_data: selection.user_data.then_some(las_point.user_data),
+            point_source_id: selection
+                .point_source_id
+                .then_some(las_point.point_source_id),
+            gps_time: if selection.gps_time {
+                las_point.gps_time
+            } else {
+                None
+            },
         };
 
         Point {
@@ -92,10 +104,11 @@ impl PointReader for LasPointReader {
                 }
             }
 
+            let selection = self.selection;
             let reader = self.current_reader.as_mut().unwrap();
             match reader.points().next() {
                 Some(Ok(las_point)) => {
-                    let p = Self::convert_las_point(las_point);
+                    let p = Self::convert_las_point(las_point, selection);
                     return Ok(Some(p));
                 }
                 Some(Err(e)) => {
@@ -143,5 +156,70 @@ impl<R: PointReader> Iterator for PointIterator<R> {
         } else {
             Some(buffer)
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::LasPointReader;
+    use crate::reader::AttributeSelection;
+    use las::point::Classification;
+
+    fn sample_las_point() -> las::Point {
+        las::Point {
+            x: 1.0,
+            y: 2.0,
+            z: 3.0,
+            intensity: 1234,
+            return_number: 2,
+            classification: Classification::Ground,
+            scanner_channel: 3,
+            scan_angle: -4.5,
+            user_data: 17,
+            point_source_id: 99,
+            gps_time: Some(123.456),
+            ..Default::default()
+        }
+    }
+
+    #[test]
+    fn convert_las_point_maps_selected_attributes() {
+        let selection = AttributeSelection {
+            intensity: true,
+            return_number: true,
+            classification: true,
+            scanner_channel: true,
+            scan_angle: true,
+            user_data: true,
+            point_source_id: true,
+            gps_time: true,
+        };
+        let point = LasPointReader::convert_las_point(sample_las_point(), selection);
+        assert_eq!(point.attributes.intensity, Some(1234));
+        assert_eq!(point.attributes.return_number, Some(2));
+        assert_eq!(point.attributes.classification, Some(2));
+        assert_eq!(point.attributes.scanner_channel, Some(3));
+        assert_eq!(point.attributes.scan_angle, Some(-4.5));
+        assert_eq!(point.attributes.user_data, Some(17));
+        assert_eq!(point.attributes.point_source_id, Some(99));
+        assert_eq!(point.attributes.gps_time, Some(123.456));
+    }
+
+    #[test]
+    fn convert_las_point_drops_unselected_attributes() {
+        let selection = AttributeSelection {
+            intensity: true,
+            classification: true,
+            ..Default::default()
+        };
+        let point = LasPointReader::convert_las_point(sample_las_point(), selection);
+        assert_eq!(point.attributes.intensity, Some(1234));
+        assert_eq!(point.attributes.classification, Some(2));
+        assert_eq!(point.attributes.return_number, None);
+        assert_eq!(point.attributes.scanner_channel, None);
+        assert_eq!(point.attributes.scan_angle, None);
+        assert_eq!(point.attributes.user_data, None);
+        assert_eq!(point.attributes.point_source_id, None);
+        assert_eq!(point.attributes.gps_time, None);
     }
 }

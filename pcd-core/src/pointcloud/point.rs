@@ -9,7 +9,7 @@ pub type EpsgCode = u16;
 pub struct PointAttributes {
     pub intensity: Option<u16>,
     pub return_number: Option<u8>,
-    pub classification: Option<String>,
+    pub classification: Option<u8>,
     pub scanner_channel: Option<u8>,
     pub scan_angle: Option<f32>,
     pub user_data: Option<u8>,
