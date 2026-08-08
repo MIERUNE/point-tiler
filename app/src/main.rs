@@ -155,18 +155,25 @@ const ATTR_USER_DATA: u8 = 1 << 5;
 const ATTR_POINT_SOURCE_ID: u8 = 1 << 6;
 const ATTR_GPS_TIME: u8 = 1 << 7;
 
-const RUN_RECORD_BYTES: usize = 8 // tile_id (u64)
-    + 8 * 3 // x, y, z (f64)
-    + 2 * 3 // r, g, b (u16)
-    + 1 // attribute_mask (u8)
-    + 2 // intensity (u16)
-    + 1 // return_number (u8)
-    + 1 // classification (u8)
-    + 1 // scanner_channel (u8)
-    + 4 // scan_angle (f32)
-    + 1 // user_data (u8)
-    + 2 // point_source_id (u16)
-    + 8; // gps_time (f64)
+// Total run-record size: the fixed prefix (tile_id + x,y,z + r,g,b + mask)
+// followed by the selected attributes. The selection is chosen once from the
+// CLI and is identical for every point, so this is computed once and reused for
+// every read and write.
+fn run_record_bytes(selection: &AttributeSelection) -> usize {
+    let attr = |present: bool, size: usize| if present { size } else { 0 };
+    8 // tile_id (u64)
+        + 8 * 3 // x, y, z (f64)
+        + 2 * 3 // r, g, b (u16)
+        + 1 // attribute_mask (u8)
+        + attr(selection.intensity, 2)
+        + attr(selection.return_number, 1)
+        + attr(selection.classification, 1)
+        + attr(selection.scanner_channel, 1)
+        + attr(selection.scan_angle, 4)
+        + attr(selection.user_data, 1)
+        + attr(selection.point_source_id, 2)
+        + attr(selection.gps_time, 8)
+}
 
 impl From<Point> for CompactPoint {
     fn from(point: Point) -> Self {
@@ -230,27 +237,56 @@ impl From<CompactPoint> for Point {
     }
 }
 
-fn write_run_file(path: &Path, records: &[(SortKey, CompactPoint)]) -> std::io::Result<()> {
+fn write_run_file(
+    path: &Path,
+    records: &[(SortKey, CompactPoint)],
+    record_bytes: usize,
+) -> std::io::Result<()> {
     let file = File::create(path)?;
     let mut writer = BufWriter::new(file);
 
+    // Every record is the same, precomputed size, so the scratch buffer is
+    // sized once and each record is assembled with a single `write_all`.
+    let mut buf = Vec::with_capacity(record_bytes);
     for (key, point) in records {
-        writer.write_all(&key.tile_id.to_le_bytes())?;
-        writer.write_all(&point.x.to_le_bytes())?;
-        writer.write_all(&point.y.to_le_bytes())?;
-        writer.write_all(&point.z.to_le_bytes())?;
-        writer.write_all(&point.r.to_le_bytes())?;
-        writer.write_all(&point.g.to_le_bytes())?;
-        writer.write_all(&point.b.to_le_bytes())?;
-        writer.write_all(&point.attribute_mask.to_le_bytes())?;
-        writer.write_all(&point.intensity.to_le_bytes())?;
-        writer.write_all(&point.return_number.to_le_bytes())?;
-        writer.write_all(&point.classification.to_le_bytes())?;
-        writer.write_all(&point.scanner_channel.to_le_bytes())?;
-        writer.write_all(&point.scan_angle.to_le_bytes())?;
-        writer.write_all(&point.user_data.to_le_bytes())?;
-        writer.write_all(&point.point_source_id.to_le_bytes())?;
-        writer.write_all(&point.gps_time.to_le_bytes())?;
+        buf.clear();
+        buf.extend_from_slice(&key.tile_id.to_le_bytes());
+        buf.extend_from_slice(&point.x.to_le_bytes());
+        buf.extend_from_slice(&point.y.to_le_bytes());
+        buf.extend_from_slice(&point.z.to_le_bytes());
+        buf.extend_from_slice(&point.r.to_le_bytes());
+        buf.extend_from_slice(&point.g.to_le_bytes());
+        buf.extend_from_slice(&point.b.to_le_bytes());
+        buf.extend_from_slice(&point.attribute_mask.to_le_bytes());
+
+        // Only the attributes flagged in the mask are written.
+        let mask = point.attribute_mask;
+        if mask & ATTR_INTENSITY != 0 {
+            buf.extend_from_slice(&point.intensity.to_le_bytes());
+        }
+        if mask & ATTR_RETURN_NUMBER != 0 {
+            buf.extend_from_slice(&point.return_number.to_le_bytes());
+        }
+        if mask & ATTR_CLASSIFICATION != 0 {
+            buf.extend_from_slice(&point.classification.to_le_bytes());
+        }
+        if mask & ATTR_SCANNER_CHANNEL != 0 {
+            buf.extend_from_slice(&point.scanner_channel.to_le_bytes());
+        }
+        if mask & ATTR_SCAN_ANGLE != 0 {
+            buf.extend_from_slice(&point.scan_angle.to_le_bytes());
+        }
+        if mask & ATTR_USER_DATA != 0 {
+            buf.extend_from_slice(&point.user_data.to_le_bytes());
+        }
+        if mask & ATTR_POINT_SOURCE_ID != 0 {
+            buf.extend_from_slice(&point.point_source_id.to_le_bytes());
+        }
+        if mask & ATTR_GPS_TIME != 0 {
+            buf.extend_from_slice(&point.gps_time.to_le_bytes());
+        }
+
+        writer.write_all(&buf)?;
     }
 
     writer.flush()?;
@@ -260,42 +296,93 @@ fn write_run_file(path: &Path, records: &[(SortKey, CompactPoint)]) -> std::io::
 struct RunFileReader {
     path: PathBuf,
     reader: BufReader<File>,
+    record: Vec<u8>,
 }
 
 impl RunFileReader {
-    fn open(path: PathBuf) -> std::io::Result<Self> {
+    fn open(path: PathBuf, record_bytes: usize) -> std::io::Result<Self> {
         let file = File::open(&path)?;
         Ok(Self {
             path,
             reader: BufReader::new(file),
+            record: vec![0u8; record_bytes],
         })
     }
 
+    #[allow(unused_assignments)]
     fn next_record(&mut self) -> std::io::Result<Option<(SortKey, CompactPoint)>> {
-        let mut record = [0u8; RUN_RECORD_BYTES];
-        match self.reader.read_exact(&mut record) {
+        // The record size is the same for every point in the run and was
+        // computed once, so the whole record is read in a single `read_exact`
+        // into a reused buffer.
+        let record = &mut self.record;
+        match self.reader.read_exact(record) {
             Ok(()) => {
-                let key = SortKey {
-                    tile_id: u64::from_le_bytes(record[0..8].try_into().unwrap()),
-                };
+                let mut offset = 0;
+                // Takes the next `n` bytes at the cursor and advances past them.
+                macro_rules! read_next {
+                    ($n:expr) => {{
+                        let bytes = record[offset..offset + $n].try_into().unwrap();
+                        offset += $n;
+                        bytes
+                    }};
+                }
+
+                let tile_id = u64::from_le_bytes(read_next!(8));
+                let mask;
+
                 let point = CompactPoint {
-                    x: f64::from_le_bytes(record[8..16].try_into().unwrap()),
-                    y: f64::from_le_bytes(record[16..24].try_into().unwrap()),
-                    z: f64::from_le_bytes(record[24..32].try_into().unwrap()),
-                    r: u16::from_le_bytes(record[32..34].try_into().unwrap()),
-                    g: u16::from_le_bytes(record[34..36].try_into().unwrap()),
-                    b: u16::from_le_bytes(record[36..38].try_into().unwrap()),
-                    attribute_mask: u8::from_le_bytes(record[38..39].try_into().unwrap()),
-                    intensity: u16::from_le_bytes(record[39..41].try_into().unwrap()),
-                    return_number: u8::from_le_bytes(record[41..42].try_into().unwrap()),
-                    classification: u8::from_le_bytes(record[42..43].try_into().unwrap()),
-                    scanner_channel: u8::from_le_bytes(record[43..44].try_into().unwrap()),
-                    scan_angle: f32::from_le_bytes(record[44..48].try_into().unwrap()),
-                    user_data: u8::from_le_bytes(record[48..49].try_into().unwrap()),
-                    point_source_id: u16::from_le_bytes(record[49..51].try_into().unwrap()),
-                    gps_time: f64::from_le_bytes(record[51..59].try_into().unwrap()),
+                    x: f64::from_le_bytes(read_next!(8)),
+                    y: f64::from_le_bytes(read_next!(8)),
+                    z: f64::from_le_bytes(read_next!(8)),
+                    r: u16::from_le_bytes(read_next!(2)),
+                    g: u16::from_le_bytes(read_next!(2)),
+                    b: u16::from_le_bytes(read_next!(2)),
+                    attribute_mask: {
+                        mask = u8::from_le_bytes(read_next!(1));
+                        mask
+                    },
+                    intensity: if mask & ATTR_INTENSITY != 0 {
+                        u16::from_le_bytes(read_next!(2))
+                    } else {
+                        0
+                    },
+                    return_number: if mask & ATTR_RETURN_NUMBER != 0 {
+                        u8::from_le_bytes(read_next!(1))
+                    } else {
+                        0
+                    },
+                    classification: if mask & ATTR_CLASSIFICATION != 0 {
+                        u8::from_le_bytes(read_next!(1))
+                    } else {
+                        0
+                    },
+                    scanner_channel: if mask & ATTR_SCANNER_CHANNEL != 0 {
+                        u8::from_le_bytes(read_next!(1))
+                    } else {
+                        0
+                    },
+                    scan_angle: if mask & ATTR_SCAN_ANGLE != 0 {
+                        f32::from_le_bytes(read_next!(4))
+                    } else {
+                        0.0
+                    },
+                    user_data: if mask & ATTR_USER_DATA != 0 {
+                        u8::from_le_bytes(read_next!(1))
+                    } else {
+                        0
+                    },
+                    point_source_id: if mask & ATTR_POINT_SOURCE_ID != 0 {
+                        u16::from_le_bytes(read_next!(2))
+                    } else {
+                        0
+                    },
+                    gps_time: if mask & ATTR_GPS_TIME != 0 {
+                        f64::from_le_bytes(read_next!(8))
+                    } else {
+                        0.0
+                    },
                 };
-                Ok(Some((key, point)))
+                Ok(Some((SortKey { tile_id }, point)))
             }
             Err(error) if error.kind() == ErrorKind::UnexpectedEof => Ok(None),
             Err(error) => Err(error),
@@ -749,12 +836,13 @@ fn merge_shard_run_files(
     run_files: Vec<PathBuf>,
     output_base_path: &Path,
     disable_decimation: bool,
+    record_bytes: usize,
 ) -> std::io::Result<()> {
     let mut readers = Vec::<Option<RunFileReader>>::new();
     let mut heap = BinaryHeap::<HeapItem>::new();
 
     for path in run_files {
-        let mut reader = RunFileReader::open(path)?;
+        let mut reader = RunFileReader::open(path, record_bytes)?;
         let reader_index = readers.len();
         match reader.next_record()? {
             Some((key, point)) => {
@@ -1060,6 +1148,7 @@ fn external_sort_workflow(
 
     let tmp_run_file_dir_path = tempdir().unwrap();
     let mut tile_contents_all = Vec::new();
+    let record_bytes = run_record_bytes(&args.attribute_selection());
 
     {
         let max_memory_mb: usize = args.max_memory_mb;
@@ -1078,7 +1167,6 @@ fn external_sort_workflow(
         let epsg_in = args.input_epsg;
         let epsg_out = args.output_epsg;
         let selection = args.attribute_selection();
-
         log::info!("memory budget: {}", format_size(max_memory_mb_bytes as u64));
         log::info!("reader chunk target: {}", format_size(one_chunk_mem as u64));
         log::info!("channel_capacity: {}", channel_capacity);
@@ -1163,7 +1251,7 @@ fn external_sort_workflow(
                     shard_z, shard_x, shard_y, current_run_index
                 ));
                 fs::create_dir_all(run_file_path.parent().unwrap()).unwrap();
-                write_run_file(&run_file_path, &keyed_points).unwrap();
+                write_run_file(&run_file_path, &keyed_points, record_bytes).unwrap();
             }
         }
 
@@ -1220,7 +1308,12 @@ fn external_sort_workflow(
             );
 
             let tmp_tiled_file_dir_path = tempdir().unwrap();
-            merge_shard_run_files(run_files, tmp_tiled_file_dir_path.path(), args.disable_decimation)?;
+            merge_shard_run_files(
+                run_files,
+                tmp_tiled_file_dir_path.path(),
+                args.disable_decimation,
+                record_bytes,
+            )?;
             log_directory_summary(
                 "tile files after shard sort",
                 tmp_tiled_file_dir_path.path(),
@@ -1476,6 +1569,7 @@ mod tests {
         let run_a = run_dir.path().join("run_a.bin");
         let run_b = run_dir.path().join("run_b.bin");
 
+        let record_bytes = run_record_bytes(&AttributeSelection::default());
         write_run_file(
             &run_a,
             &[
@@ -1488,6 +1582,7 @@ mod tests {
                     CompactPoint::from(point(4.0, 4.0, 4.0)),
                 ),
             ],
+            record_bytes,
         )
         .unwrap();
         write_run_file(
@@ -1502,10 +1597,17 @@ mod tests {
                     CompactPoint::from(point(3.0, 3.0, 3.0)),
                 ),
             ],
+            record_bytes,
         )
         .unwrap();
 
-        merge_shard_run_files(vec![run_a.clone(), run_b.clone()], tile_dir.path(), true).unwrap();
+        merge_shard_run_files(
+            vec![run_a.clone(), run_b.clone()],
+            tile_dir.path(),
+            true,
+            record_bytes,
+        )
+        .unwrap();
 
         let tile_a_points = read_points_from_tile(
             &tile_dir
@@ -1576,5 +1678,79 @@ mod tests {
             original.attributes.point_source_id
         );
         assert_eq!(restored.attributes.gps_time, original.attributes.gps_time);
+    }
+
+    #[test]
+    fn run_file_round_trip_preserves_mixed_attribute_presence() {
+        let dir = tempdir().unwrap();
+        let path = dir.path().join("run.bin");
+
+        let attrs = PointAttributes {
+            intensity: Some(65000),
+            return_number: Some(3),
+            classification: Some(7),
+            scanner_channel: Some(2),
+            scan_angle: Some(-12.5),
+            user_data: Some(21),
+            point_source_id: Some(1234),
+            gps_time: Some(9876.5),
+        };
+
+        let mut a = point(1.0, 2.0, 3.0);
+        a.attributes = attrs.clone();
+        let mut b = point(4.0, 5.0, 6.0);
+        b.attributes = attrs.clone();
+        let mut c = point(7.0, 8.0, 9.0);
+        c.attributes = attrs.clone();
+
+        let originals = [a, b, c];
+        let records: Vec<(SortKey, CompactPoint)> = originals
+            .iter()
+            .enumerate()
+            .map(|(i, p)| (SortKey { tile_id: i as u64 }, CompactPoint::from(p.clone())))
+            .collect();
+
+        let record_bytes = run_record_bytes(&AttributeSelection {
+            intensity: true,
+            return_number: true,
+            classification: true,
+            scanner_channel: true,
+            scan_angle: true,
+            user_data: true,
+            point_source_id: true,
+            gps_time: true,
+        });
+        write_run_file(&path, &records, record_bytes).unwrap();
+
+        let mut reader = RunFileReader::open(path, record_bytes).unwrap();
+        for (i, original) in originals.iter().enumerate() {
+            let (key, compact) = reader.next_record().unwrap().unwrap();
+            assert_eq!(key.tile_id, i as u64);
+            let restored = Point::from(compact);
+            assert_eq!(restored.x, original.x);
+            assert_eq!(restored.y, original.y);
+            assert_eq!(restored.z, original.z);
+            assert_eq!(restored.attributes.intensity, original.attributes.intensity);
+            assert_eq!(
+                restored.attributes.return_number,
+                original.attributes.return_number
+            );
+            assert_eq!(
+                restored.attributes.classification,
+                original.attributes.classification
+            );
+            assert_eq!(
+                restored.attributes.scanner_channel,
+                original.attributes.scanner_channel
+            );
+            assert_eq!(restored.attributes.scan_angle, original.attributes.scan_angle);
+            assert_eq!(restored.attributes.user_data, original.attributes.user_data);
+            assert_eq!(
+                restored.attributes.point_source_id,
+                original.attributes.point_source_id
+            );
+            assert_eq!(restored.attributes.gps_time, original.attributes.gps_time);
+        }
+        assert!(reader.next_record().unwrap().is_none());
     }
 }
