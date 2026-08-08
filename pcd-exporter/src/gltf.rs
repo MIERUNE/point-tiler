@@ -234,10 +234,10 @@ fn build_structural_metadata(points: &PointCloud) -> Option<StructuralMetadataIn
         return None;
     }
 
-    // Attribute presence is uniform across a file (driven by the CLI selection),
-    // so the first point tells us which properties exist. This lets us skip the
-    // accumulation loop entirely when nothing is selected, and avoid allocating
-    // buffers for absent fields.
+    // Readers encode selection as presence: selected fields are always `Some`,
+    // unselected fields are always `None`. That makes attribute presence
+    // consistent across all points, so the first point is enough to detect
+    // which properties exist.
     let first = &points.points[0].attributes;
     let has_intensity = first.intensity.is_some();
     let has_return_number = first.return_number.is_some();
@@ -529,6 +529,14 @@ fn assemble_glb<'a>(
                     ..Default::default()
                 },
             );
+        }
+
+        // The BIN chunk (and the buffer describing it) must be 4-byte aligned.
+        // Appending metadata property bytes can leave an unaligned length
+        // (e.g. a single u8/u16 property), so pad up to the next multiple of 4.
+        let bin_pad = (4 - (bin_content.len() % 4)) % 4;
+        if bin_pad > 0 {
+            bin_content.resize(bin_content.len() + bin_pad, 0);
         }
 
         gltf_buffers[0].byte_length = bin_content.len() as u32;
@@ -913,6 +921,61 @@ mod tests {
         assert_eq!(property_table["count"], 2);
         let property_table_props = property_table["properties"].as_object().unwrap();
         assert_eq!(property_table_props.len(), 8);
+    }
+
+    fn point_with_classification(
+        x: f64,
+        classification: Option<u8>,
+    ) -> pcd_core::pointcloud::point::Point {
+        Point {
+            x,
+            y: x,
+            z: x,
+            color: Color { r: 0, g: 0, b: 0 },
+            attributes: PointAttributes {
+                intensity: None,
+                return_number: None,
+                classification,
+                scanner_channel: None,
+                scan_angle: None,
+                user_data: None,
+                point_source_id: None,
+                gps_time: None,
+            },
+        }
+    }
+
+    #[test]
+    fn test_glb_with_single_u8_metadata_is_4byte_aligned() {
+        // A single u8 property yields an odd number of metadata bytes; the BIN
+        // buffer/chunk must still be padded to a 4-byte boundary.
+        let points = PointCloud {
+            points: vec![
+                point_with_classification(0.0, Some(1)),
+                point_with_classification(1.0, Some(2)),
+                point_with_classification(2.0, Some(3)),
+            ],
+            metadata: Metadata {
+                point_count: 3,
+                offset: [0.0, 0.0, 0.0],
+                ..Default::default()
+            },
+        };
+        let glb = generate_glb_with_options(points, &GlbOptions::default()).unwrap();
+        let json = parse_glb_json(&glb);
+
+        let byte_length = json["buffers"][0]["byteLength"].as_u64().unwrap();
+        assert_eq!(
+            byte_length % 4,
+            0,
+            "BIN buffer byteLength must be 4-aligned"
+        );
+
+        // The serialized GLB must also parse back cleanly.
+        let mut buf = Vec::new();
+        glb.to_writer_with_alignment(&mut buf, 8).unwrap();
+        let parsed = cesiumtiles_gltf::glb::Glb::from_reader(&buf[..]).unwrap();
+        let _json: serde_json::Value = serde_json::from_slice(&parsed.json).unwrap();
     }
 
     #[test]

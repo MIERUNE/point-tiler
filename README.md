@@ -154,6 +154,8 @@ During conversion, temporary intermediate files are generated on disk. In curren
 
 If neither flag is set, no extra attributes are included. Metadata is encoded in GLB using `EXT_structural_metadata` + `EXT_mesh_features`.
 
+When an attribute is selected but missing for a given point (a blank CSV cell, or a LAS point format that does not carry the field), it is embedded with a default value of `0` rather than being omitted.
+
 ### Coordinate Systems
 
 This tool uses the PROJ library for coordinate transformation, supporting any EPSG code.

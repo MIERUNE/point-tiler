@@ -77,11 +77,9 @@ impl LasPointReader {
             point_source_id: selection
                 .point_source_id
                 .then_some(las_point.point_source_id),
-            gps_time: if selection.gps_time {
-                las_point.gps_time
-            } else {
-                None
-            },
+            gps_time: selection
+                .gps_time
+                .then(|| las_point.gps_time.unwrap_or_default()),
         };
 
         Point {

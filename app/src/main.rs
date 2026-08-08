@@ -135,7 +135,6 @@ struct CompactPoint {
     r: u16,
     g: u16,
     b: u16,
-    attribute_mask: u8,
     intensity: u16,
     return_number: u8,
     classification: u8,
@@ -146,25 +145,15 @@ struct CompactPoint {
     gps_time: f64,
 }
 
-const ATTR_INTENSITY: u8 = 1 << 0;
-const ATTR_RETURN_NUMBER: u8 = 1 << 1;
-const ATTR_CLASSIFICATION: u8 = 1 << 2;
-const ATTR_SCANNER_CHANNEL: u8 = 1 << 3;
-const ATTR_SCAN_ANGLE: u8 = 1 << 4;
-const ATTR_USER_DATA: u8 = 1 << 5;
-const ATTR_POINT_SOURCE_ID: u8 = 1 << 6;
-const ATTR_GPS_TIME: u8 = 1 << 7;
-
-// Total run-record size: the fixed prefix (tile_id + x,y,z + r,g,b + mask)
-// followed by the selected attributes. The selection is chosen once from the
-// CLI and is identical for every point, so this is computed once and reused for
-// every read and write.
+// Total run-record size: the fixed prefix (tile_id + x,y,z + r,g,b) followed by
+// the selected attributes. The selection is chosen once from the CLI and is
+// identical for every point, so this is computed once and reused for every read
+// and write.
 fn run_record_bytes(selection: &AttributeSelection) -> usize {
     let attr = |present: bool, size: usize| if present { size } else { 0 };
     8 // tile_id (u64)
         + 8 * 3 // x, y, z (f64)
         + 2 * 3 // r, g, b (u16)
-        + 1 // attribute_mask (u8)
         + attr(selection.intensity, 2)
         + attr(selection.return_number, 1)
         + attr(selection.classification, 1)
@@ -177,17 +166,6 @@ fn run_record_bytes(selection: &AttributeSelection) -> usize {
 
 impl From<Point> for CompactPoint {
     fn from(point: Point) -> Self {
-        let attrs = &point.attributes;
-        let flag = |present: bool, bit: u8| if present { bit } else { 0 };
-        let attribute_mask = flag(attrs.intensity.is_some(), ATTR_INTENSITY)
-            | flag(attrs.return_number.is_some(), ATTR_RETURN_NUMBER)
-            | flag(attrs.classification.is_some(), ATTR_CLASSIFICATION)
-            | flag(attrs.scanner_channel.is_some(), ATTR_SCANNER_CHANNEL)
-            | flag(attrs.scan_angle.is_some(), ATTR_SCAN_ANGLE)
-            | flag(attrs.user_data.is_some(), ATTR_USER_DATA)
-            | flag(attrs.point_source_id.is_some(), ATTR_POINT_SOURCE_ID)
-            | flag(attrs.gps_time.is_some(), ATTR_GPS_TIME);
-
         Self {
             x: point.x,
             y: point.y,
@@ -195,7 +173,6 @@ impl From<Point> for CompactPoint {
             r: point.color.r,
             g: point.color.g,
             b: point.color.b,
-            attribute_mask,
             intensity: point.attributes.intensity.unwrap_or_default(),
             return_number: point.attributes.return_number.unwrap_or_default(),
             classification: point.attributes.classification.unwrap_or_default(),
@@ -208,30 +185,29 @@ impl From<Point> for CompactPoint {
     }
 }
 
-impl From<CompactPoint> for Point {
-    fn from(point: CompactPoint) -> Self {
-        Self {
-            x: point.x,
-            y: point.y,
-            z: point.z,
+impl CompactPoint {
+    /// Reconstructs a `Point`, marking each attribute `Some` iff it was selected.
+    /// Presence is uniform across a run (readers emit `Some` for every selected
+    /// field), so the CLI selection is the single source of truth.
+    fn into_point(self, selection: &AttributeSelection) -> Point {
+        Point {
+            x: self.x,
+            y: self.y,
+            z: self.z,
             color: pcd_core::pointcloud::point::Color {
-                r: point.r,
-                g: point.g,
-                b: point.b,
+                r: self.r,
+                g: self.g,
+                b: self.b,
             },
             attributes: pcd_core::pointcloud::point::PointAttributes {
-                intensity: (point.attribute_mask & ATTR_INTENSITY != 0).then_some(point.intensity),
-                return_number: (point.attribute_mask & ATTR_RETURN_NUMBER != 0)
-                    .then_some(point.return_number),
-                classification: (point.attribute_mask & ATTR_CLASSIFICATION != 0)
-                    .then_some(point.classification),
-                scanner_channel: (point.attribute_mask & ATTR_SCANNER_CHANNEL != 0)
-                    .then_some(point.scanner_channel),
-                scan_angle: (point.attribute_mask & ATTR_SCAN_ANGLE != 0).then_some(point.scan_angle),
-                user_data: (point.attribute_mask & ATTR_USER_DATA != 0).then_some(point.user_data),
-                point_source_id: (point.attribute_mask & ATTR_POINT_SOURCE_ID != 0)
-                    .then_some(point.point_source_id),
-                gps_time: (point.attribute_mask & ATTR_GPS_TIME != 0).then_some(point.gps_time),
+                intensity: selection.intensity.then_some(self.intensity),
+                return_number: selection.return_number.then_some(self.return_number),
+                classification: selection.classification.then_some(self.classification),
+                scanner_channel: selection.scanner_channel.then_some(self.scanner_channel),
+                scan_angle: selection.scan_angle.then_some(self.scan_angle),
+                user_data: selection.user_data.then_some(self.user_data),
+                point_source_id: selection.point_source_id.then_some(self.point_source_id),
+                gps_time: selection.gps_time.then_some(self.gps_time),
             },
         }
     }
@@ -240,14 +216,15 @@ impl From<CompactPoint> for Point {
 fn write_run_file(
     path: &Path,
     records: &[(SortKey, CompactPoint)],
-    record_bytes: usize,
+    selection: &AttributeSelection,
 ) -> std::io::Result<()> {
     let file = File::create(path)?;
     let mut writer = BufWriter::new(file);
 
-    // Every record is the same, precomputed size, so the scratch buffer is
-    // sized once and each record is assembled with a single `write_all`.
-    let mut buf = Vec::with_capacity(record_bytes);
+    // Every record has the same, fixed layout driven by the CLI selection, so
+    // the scratch buffer is sized once and each record is assembled with a
+    // single `write_all`.
+    let mut buf = Vec::with_capacity(run_record_bytes(selection));
     for (key, point) in records {
         buf.clear();
         buf.extend_from_slice(&key.tile_id.to_le_bytes());
@@ -257,32 +234,31 @@ fn write_run_file(
         buf.extend_from_slice(&point.r.to_le_bytes());
         buf.extend_from_slice(&point.g.to_le_bytes());
         buf.extend_from_slice(&point.b.to_le_bytes());
-        buf.extend_from_slice(&point.attribute_mask.to_le_bytes());
 
-        // Only the attributes flagged in the mask are written.
-        let mask = point.attribute_mask;
-        if mask & ATTR_INTENSITY != 0 {
+        // A fixed slot is written for every selected attribute (never gated on
+        // per-point presence), so all records are exactly `run_record_bytes`.
+        if selection.intensity {
             buf.extend_from_slice(&point.intensity.to_le_bytes());
         }
-        if mask & ATTR_RETURN_NUMBER != 0 {
+        if selection.return_number {
             buf.extend_from_slice(&point.return_number.to_le_bytes());
         }
-        if mask & ATTR_CLASSIFICATION != 0 {
+        if selection.classification {
             buf.extend_from_slice(&point.classification.to_le_bytes());
         }
-        if mask & ATTR_SCANNER_CHANNEL != 0 {
+        if selection.scanner_channel {
             buf.extend_from_slice(&point.scanner_channel.to_le_bytes());
         }
-        if mask & ATTR_SCAN_ANGLE != 0 {
+        if selection.scan_angle {
             buf.extend_from_slice(&point.scan_angle.to_le_bytes());
         }
-        if mask & ATTR_USER_DATA != 0 {
+        if selection.user_data {
             buf.extend_from_slice(&point.user_data.to_le_bytes());
         }
-        if mask & ATTR_POINT_SOURCE_ID != 0 {
+        if selection.point_source_id {
             buf.extend_from_slice(&point.point_source_id.to_le_bytes());
         }
-        if mask & ATTR_GPS_TIME != 0 {
+        if selection.gps_time {
             buf.extend_from_slice(&point.gps_time.to_le_bytes());
         }
 
@@ -297,24 +273,27 @@ struct RunFileReader {
     path: PathBuf,
     reader: BufReader<File>,
     record: Vec<u8>,
+    selection: AttributeSelection,
 }
 
 impl RunFileReader {
-    fn open(path: PathBuf, record_bytes: usize) -> std::io::Result<Self> {
+    fn open(path: PathBuf, selection: AttributeSelection) -> std::io::Result<Self> {
         let file = File::open(&path)?;
         Ok(Self {
             path,
             reader: BufReader::new(file),
-            record: vec![0u8; record_bytes],
+            record: vec![0u8; run_record_bytes(&selection)],
+            selection,
         })
     }
 
     #[allow(unused_assignments)]
     fn next_record(&mut self) -> std::io::Result<Option<(SortKey, CompactPoint)>> {
-        // The record size is the same for every point in the run and was
-        // computed once, so the whole record is read in a single `read_exact`
-        // into a reused buffer.
+        // The record size is fixed for every point in the run (driven by the
+        // selection), so the whole record is read in a single `read_exact` into
+        // a reused buffer.
         let record = &mut self.record;
+        let selection = &self.selection;
         match self.reader.read_exact(record) {
             Ok(()) => {
                 let mut offset = 0;
@@ -328,7 +307,6 @@ impl RunFileReader {
                 }
 
                 let tile_id = u64::from_le_bytes(read_next!(8));
-                let mask;
 
                 let point = CompactPoint {
                     x: f64::from_le_bytes(read_next!(8)),
@@ -337,46 +315,42 @@ impl RunFileReader {
                     r: u16::from_le_bytes(read_next!(2)),
                     g: u16::from_le_bytes(read_next!(2)),
                     b: u16::from_le_bytes(read_next!(2)),
-                    attribute_mask: {
-                        mask = u8::from_le_bytes(read_next!(1));
-                        mask
-                    },
-                    intensity: if mask & ATTR_INTENSITY != 0 {
+                    intensity: if selection.intensity {
                         u16::from_le_bytes(read_next!(2))
                     } else {
                         0
                     },
-                    return_number: if mask & ATTR_RETURN_NUMBER != 0 {
+                    return_number: if selection.return_number {
                         u8::from_le_bytes(read_next!(1))
                     } else {
                         0
                     },
-                    classification: if mask & ATTR_CLASSIFICATION != 0 {
+                    classification: if selection.classification {
                         u8::from_le_bytes(read_next!(1))
                     } else {
                         0
                     },
-                    scanner_channel: if mask & ATTR_SCANNER_CHANNEL != 0 {
+                    scanner_channel: if selection.scanner_channel {
                         u8::from_le_bytes(read_next!(1))
                     } else {
                         0
                     },
-                    scan_angle: if mask & ATTR_SCAN_ANGLE != 0 {
+                    scan_angle: if selection.scan_angle {
                         f32::from_le_bytes(read_next!(4))
                     } else {
                         0.0
                     },
-                    user_data: if mask & ATTR_USER_DATA != 0 {
+                    user_data: if selection.user_data {
                         u8::from_le_bytes(read_next!(1))
                     } else {
                         0
                     },
-                    point_source_id: if mask & ATTR_POINT_SOURCE_ID != 0 {
+                    point_source_id: if selection.point_source_id {
                         u16::from_le_bytes(read_next!(2))
                     } else {
                         0
                     },
-                    gps_time: if mask & ATTR_GPS_TIME != 0 {
+                    gps_time: if selection.gps_time {
                         f64::from_le_bytes(read_next!(8))
                     } else {
                         0.0
@@ -836,13 +810,13 @@ fn merge_shard_run_files(
     run_files: Vec<PathBuf>,
     output_base_path: &Path,
     disable_decimation: bool,
-    record_bytes: usize,
+    selection: AttributeSelection,
 ) -> std::io::Result<()> {
     let mut readers = Vec::<Option<RunFileReader>>::new();
     let mut heap = BinaryHeap::<HeapItem>::new();
 
     for path in run_files {
-        let mut reader = RunFileReader::open(path, record_bytes)?;
+        let mut reader = RunFileReader::open(path, selection)?;
         let reader_index = readers.len();
         match reader.next_record()? {
             Some((key, point)) => {
@@ -872,7 +846,7 @@ fn merge_shard_run_files(
             current_tile_id = Some(item.key.tile_id);
         }
 
-        tile_points.push(Point::from(item.point));
+        tile_points.push(item.point.into_point(&selection));
 
         if let Some(reader) = readers[item.reader_index].as_mut() {
             match reader.next_record()? {
@@ -1148,7 +1122,7 @@ fn external_sort_workflow(
 
     let tmp_run_file_dir_path = tempdir().unwrap();
     let mut tile_contents_all = Vec::new();
-    let record_bytes = run_record_bytes(&args.attribute_selection());
+    let selection = args.attribute_selection();
 
     {
         let max_memory_mb: usize = args.max_memory_mb;
@@ -1166,7 +1140,6 @@ fn external_sort_workflow(
         let extension = check_and_get_extension(&input_files).unwrap();
         let epsg_in = args.input_epsg;
         let epsg_out = args.output_epsg;
-        let selection = args.attribute_selection();
         log::info!("memory budget: {}", format_size(max_memory_mb_bytes as u64));
         log::info!("reader chunk target: {}", format_size(one_chunk_mem as u64));
         log::info!("channel_capacity: {}", channel_capacity);
@@ -1251,7 +1224,7 @@ fn external_sort_workflow(
                     shard_z, shard_x, shard_y, current_run_index
                 ));
                 fs::create_dir_all(run_file_path.parent().unwrap()).unwrap();
-                write_run_file(&run_file_path, &keyed_points, record_bytes).unwrap();
+                write_run_file(&run_file_path, &keyed_points, &selection).unwrap();
             }
         }
 
@@ -1312,7 +1285,7 @@ fn external_sort_workflow(
                 run_files,
                 tmp_tiled_file_dir_path.path(),
                 args.disable_decimation,
-                record_bytes,
+                selection,
             )?;
             log_directory_summary(
                 "tile files after shard sort",
@@ -1569,7 +1542,7 @@ mod tests {
         let run_a = run_dir.path().join("run_a.bin");
         let run_b = run_dir.path().join("run_b.bin");
 
-        let record_bytes = run_record_bytes(&AttributeSelection::default());
+        let selection = AttributeSelection::default();
         write_run_file(
             &run_a,
             &[
@@ -1582,7 +1555,7 @@ mod tests {
                     CompactPoint::from(point(4.0, 4.0, 4.0)),
                 ),
             ],
-            record_bytes,
+            &selection,
         )
         .unwrap();
         write_run_file(
@@ -1597,7 +1570,7 @@ mod tests {
                     CompactPoint::from(point(3.0, 3.0, 3.0)),
                 ),
             ],
-            record_bytes,
+            &selection,
         )
         .unwrap();
 
@@ -1605,7 +1578,7 @@ mod tests {
             vec![run_a.clone(), run_b.clone()],
             tile_dir.path(),
             true,
-            record_bytes,
+            selection,
         )
         .unwrap();
 
@@ -1651,7 +1624,17 @@ mod tests {
             },
         };
 
-        let restored = Point::from(CompactPoint::from(original.clone()));
+        let selection = AttributeSelection {
+            intensity: true,
+            return_number: true,
+            classification: true,
+            scanner_channel: true,
+            scan_angle: true,
+            user_data: true,
+            point_source_id: true,
+            gps_time: true,
+        };
+        let restored = CompactPoint::from(original.clone()).into_point(&selection);
         assert_eq!(restored.x, original.x);
         assert_eq!(restored.y, original.y);
         assert_eq!(restored.z, original.z);
@@ -1681,7 +1664,7 @@ mod tests {
     }
 
     #[test]
-    fn run_file_round_trip_preserves_mixed_attribute_presence() {
+    fn run_file_round_trip_preserves_selected_attributes() {
         let dir = tempdir().unwrap();
         let path = dir.path().join("run.bin");
 
@@ -1710,7 +1693,7 @@ mod tests {
             .map(|(i, p)| (SortKey { tile_id: i as u64 }, CompactPoint::from(p.clone())))
             .collect();
 
-        let record_bytes = run_record_bytes(&AttributeSelection {
+        let selection = AttributeSelection {
             intensity: true,
             return_number: true,
             classification: true,
@@ -1719,14 +1702,14 @@ mod tests {
             user_data: true,
             point_source_id: true,
             gps_time: true,
-        });
-        write_run_file(&path, &records, record_bytes).unwrap();
+        };
+        write_run_file(&path, &records, &selection).unwrap();
 
-        let mut reader = RunFileReader::open(path, record_bytes).unwrap();
+        let mut reader = RunFileReader::open(path, selection).unwrap();
         for (i, original) in originals.iter().enumerate() {
             let (key, compact) = reader.next_record().unwrap().unwrap();
             assert_eq!(key.tile_id, i as u64);
-            let restored = Point::from(compact);
+            let restored = compact.into_point(&selection);
             assert_eq!(restored.x, original.x);
             assert_eq!(restored.y, original.y);
             assert_eq!(restored.z, original.z);
@@ -1752,5 +1735,50 @@ mod tests {
             assert_eq!(restored.attributes.gps_time, original.attributes.gps_time);
         }
         assert!(reader.next_record().unwrap().is_none());
+    }
+
+    #[test]
+    fn run_file_stays_aligned_when_selected_attribute_missing_on_some_points() {
+        // Regression: a selected attribute (`gps_time`) is absent on some points
+        // (e.g. a LAS format without GPS time, or a blank CSV cell). With the
+        // fixed, selection-driven record layout every record is the same size,
+        // so reads must stay in sync and reconstruct all points.
+        let dir = tempdir().unwrap();
+        let path = dir.path().join("run.bin");
+
+        let selection = AttributeSelection {
+            gps_time: true,
+            ..Default::default()
+        };
+
+        let mut with_gps = point(1.0, 2.0, 3.0);
+        with_gps.attributes.gps_time = Some(42.5);
+        let mut without_gps = point(4.0, 5.0, 6.0);
+        without_gps.attributes.gps_time = None;
+
+        let originals = [with_gps, without_gps.clone(), without_gps];
+        let records: Vec<(SortKey, CompactPoint)> = originals
+            .iter()
+            .enumerate()
+            .map(|(i, p)| (SortKey { tile_id: i as u64 }, CompactPoint::from(p.clone())))
+            .collect();
+
+        write_run_file(&path, &records, &selection).unwrap();
+
+        let mut reader = RunFileReader::open(path, selection).unwrap();
+        let mut read_back = Vec::new();
+        while let Some((key, compact)) = reader.next_record().unwrap() {
+            read_back.push((key.tile_id, compact.into_point(&selection)));
+        }
+
+        assert_eq!(read_back.len(), 3);
+        assert_eq!(read_back[0].0, 0);
+        // Selected attribute is always present after round-trip; missing values
+        // default to 0.0 rather than desynchronizing the stream.
+        assert_eq!(read_back[0].1.attributes.gps_time, Some(42.5));
+        assert_eq!(read_back[1].1.attributes.gps_time, Some(0.0));
+        assert_eq!(read_back[2].1.attributes.gps_time, Some(0.0));
+        // Unselected attributes stay `None`.
+        assert_eq!(read_back[0].1.attributes.intensity, None);
     }
 }

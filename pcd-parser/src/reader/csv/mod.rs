@@ -90,13 +90,16 @@ fn parse_optional_field(
     }
 }
 
-fn parse_optional_numeric<T>(
+/// Parses an integer-valued attribute. When the field is present but its cell is
+/// blank/absent, the value defaults (`selected == present` semantics), so a
+/// selected column always yields `Some`.
+fn parse_numeric_or_default<T>(
     record: &csv::StringRecord,
     field_mapping: &HashMap<String, usize>,
     field_name: &str,
 ) -> Result<Option<T>, Box<dyn Error>>
 where
-    T: TryFrom<i64>,
+    T: TryFrom<i64> + Default,
     <T as TryFrom<i64>>::Error: Error + Send + Sync + 'static,
 {
     match parse_optional_field(record, field_mapping, field_name) {
@@ -104,29 +107,29 @@ where
             let parsed = v.parse::<f64>()?.floor() as i64;
             Ok(Some(T::try_from(parsed)?))
         }
-        None => Ok(None),
+        None => Ok(Some(T::default())),
     }
 }
 
-fn parse_optional_f32(
+fn parse_f32_or_default(
     record: &csv::StringRecord,
     field_mapping: &HashMap<String, usize>,
     field_name: &str,
 ) -> Result<Option<f32>, Box<dyn Error>> {
     match parse_optional_field(record, field_mapping, field_name) {
         Some(v) => Ok(Some(v.parse::<f32>()?)),
-        None => Ok(None),
+        None => Ok(Some(0.0)),
     }
 }
 
-fn parse_optional_f64(
+fn parse_f64_or_default(
     record: &csv::StringRecord,
     field_mapping: &HashMap<String, usize>,
     field_name: &str,
 ) -> Result<Option<f64>, Box<dyn Error>> {
     match parse_optional_field(record, field_mapping, field_name) {
         Some(v) => Ok(Some(v.parse::<f64>()?)),
-        None => Ok(None),
+        None => Ok(Some(0.0)),
     }
 }
 
@@ -213,28 +216,28 @@ impl CsvPointReader {
         let sel = &self.selection;
         let attributes = PointAttributes {
             intensity: parse_when(sel.intensity, || {
-                parse_optional_numeric::<u16>(record, &self.field_mapping, "intensity")
+                parse_numeric_or_default::<u16>(record, &self.field_mapping, "intensity")
             })?,
             return_number: parse_when(sel.return_number, || {
-                parse_optional_numeric::<u8>(record, &self.field_mapping, "return_number")
+                parse_numeric_or_default::<u8>(record, &self.field_mapping, "return_number")
             })?,
             classification: parse_when(sel.classification, || {
-                parse_optional_numeric::<u8>(record, &self.field_mapping, "classification")
+                parse_numeric_or_default::<u8>(record, &self.field_mapping, "classification")
             })?,
             scanner_channel: parse_when(sel.scanner_channel, || {
-                parse_optional_numeric::<u8>(record, &self.field_mapping, "scanner_channel")
+                parse_numeric_or_default::<u8>(record, &self.field_mapping, "scanner_channel")
             })?,
             scan_angle: parse_when(sel.scan_angle, || {
-                parse_optional_f32(record, &self.field_mapping, "scan_angle")
+                parse_f32_or_default(record, &self.field_mapping, "scan_angle")
             })?,
             user_data: parse_when(sel.user_data, || {
-                parse_optional_numeric::<u8>(record, &self.field_mapping, "user_data")
+                parse_numeric_or_default::<u8>(record, &self.field_mapping, "user_data")
             })?,
             point_source_id: parse_when(sel.point_source_id, || {
-                parse_optional_numeric::<u16>(record, &self.field_mapping, "point_source_id")
+                parse_numeric_or_default::<u16>(record, &self.field_mapping, "point_source_id")
             })?,
             gps_time: parse_when(sel.gps_time, || {
-                parse_optional_f64(record, &self.field_mapping, "gps_time")
+                parse_f64_or_default(record, &self.field_mapping, "gps_time")
             })?,
         };
 
