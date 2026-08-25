@@ -76,6 +76,8 @@ After installing Rust, download this repository.
 | `--meshopt`            | Enable meshopt compression (`EXT_meshopt_compression`)                                                                                                     |
 | `--gzip-compress`      | Enable GZIP compression for output tiles                                                                                                                   |
 | `--disable-decimation` | Disable decimation during intermediate file generation and keep original point density                                                                     |
+| `--extra-fields`       | Comma-separated list of extra point attributes to read and embed as GLB metadata (e.g. `--extra-fields classification,intensity`). Valid values: `intensity`, `return-number`, `classification`, `scanner-channel`, `scan-angle`, `user-data`, `point-source-id`, `gps-time`. The flag may also be repeated. |
+| `--all-extra-fields`   | Read and embed all supported extra point attributes. Overrides `--extra-fields`. When neither flag is set, no extra attributes are included.                |
 
 ### Example
 
@@ -90,7 +92,8 @@ ptiler --input app/examples/data/sample.las \
     --threads 8 \
     --quantize \
     --meshopt \
-    --gzip-compress
+    --gzip-compress \
+    --extra-fields classification,intensity
 ```
 
 ### Benchmark
@@ -139,7 +142,19 @@ During conversion, temporary intermediate files are generated on disk. In curren
 
 ### Attributes
 
-At present, 3D Tiles output uses only XYZ and RGB. Other point attributes such as intensity, return number, classification, scan angle, point source ID, and GPS time are ignored during GLB generation.
+3D Tiles output always includes XYZ/RGB. Additional per-point attributes are opt-in via `--extra-fields` (or `--all-extra-fields`) and, when selected, are embedded as metadata:
+- intensity
+- return number
+- classification
+- scanner channel
+- scan angle
+- user data
+- point source ID
+- GPS time
+
+If neither flag is set, no extra attributes are included. Metadata is encoded in GLB using `EXT_structural_metadata` + `EXT_mesh_features`.
+
+When an attribute is selected but missing for a given point (a blank CSV cell, or a LAS point format that does not carry the field), it is embedded with a default value of `0` rather than being omitted.
 
 ### Coordinate Systems
 
@@ -164,8 +179,9 @@ The output tiles are thinned out so that one point is stored in a voxel grid of 
 
 It supports .csv and .txt file extensions.
 
-In CSV format, any columns other than XYZRGB will be ignored.
-Also, the column names must be "x", "y", "z" and "r", "g", "b" or "red", "green", "blue".
+In CSV format, `x`, `y`, and `z` are required.
+Color columns are optional (`r,g,b` or `red,green,blue`) and default to white if omitted.
+Additional optional attribute columns are supported: `intensity`, `return_number`, `classification`, `scanner_channel`, `scan_angle`, `user_data`, `point_source_id`, `gps_time`.
 (The case of the letters does not matter.)
 
 For example, the following data is valid.

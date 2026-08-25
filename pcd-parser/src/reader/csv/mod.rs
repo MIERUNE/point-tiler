@@ -3,7 +3,7 @@ use std::{collections::HashMap, error::Error, fs::File, io, path::PathBuf};
 use csv::ReaderBuilder;
 use pcd_core::pointcloud::point::{Color, Point, PointAttributes};
 
-use super::PointReader;
+use super::{AttributeSelection, PointReader};
 
 fn create_field_mapping(
     headers: &csv::StringRecord,
@@ -90,20 +90,73 @@ fn parse_optional_field(
     }
 }
 
+/// Parses an integer-valued attribute. When the field is present but its cell is
+/// blank/absent, the value defaults (`selected == present` semantics), so a
+/// selected column always yields `Some`.
+fn parse_numeric_or_default<T>(
+    record: &csv::StringRecord,
+    field_mapping: &HashMap<String, usize>,
+    field_name: &str,
+) -> Result<Option<T>, Box<dyn Error>>
+where
+    T: TryFrom<i64> + Default,
+    <T as TryFrom<i64>>::Error: Error + Send + Sync + 'static,
+{
+    match parse_optional_field(record, field_mapping, field_name) {
+        Some(v) => {
+            let parsed = v.parse::<f64>()?.floor() as i64;
+            Ok(Some(T::try_from(parsed)?))
+        }
+        None => Ok(Some(T::default())),
+    }
+}
+
+fn parse_f32_or_default(
+    record: &csv::StringRecord,
+    field_mapping: &HashMap<String, usize>,
+    field_name: &str,
+) -> Result<Option<f32>, Box<dyn Error>> {
+    match parse_optional_field(record, field_mapping, field_name) {
+        Some(v) => Ok(Some(v.parse::<f32>()?)),
+        None => Ok(Some(0.0)),
+    }
+}
+
+fn parse_f64_or_default(
+    record: &csv::StringRecord,
+    field_mapping: &HashMap<String, usize>,
+    field_name: &str,
+) -> Result<Option<f64>, Box<dyn Error>> {
+    match parse_optional_field(record, field_mapping, field_name) {
+        Some(v) => Ok(Some(v.parse::<f64>()?)),
+        None => Ok(Some(0.0)),
+    }
+}
+
+/// Runs `parse` only when the attribute is selected, otherwise yields `None`.
+fn parse_when<T>(
+    selected: bool,
+    parse: impl FnOnce() -> Result<Option<T>, Box<dyn Error>>,
+) -> Result<Option<T>, Box<dyn Error>> {
+    if selected { parse() } else { Ok(None) }
+}
+
 pub struct CsvPointReader {
     pub files: Vec<PathBuf>,
     pub current_file_index: usize,
     pub current_reader: Option<csv::Reader<File>>,
     pub field_mapping: HashMap<String, usize>,
+    pub selection: AttributeSelection,
 }
 
 impl CsvPointReader {
-    pub fn new(files: Vec<PathBuf>) -> io::Result<Self> {
+    pub fn new(files: Vec<PathBuf>, selection: AttributeSelection) -> io::Result<Self> {
         let mut reader = CsvPointReader {
             files,
             current_file_index: 0,
             current_reader: None,
             field_mapping: HashMap::new(),
+            selection,
         };
 
         reader.open_next_file()?;
@@ -160,43 +213,33 @@ impl CsvPointReader {
 
         let color = Color { r, g, b };
 
+        let sel = &self.selection;
         let attributes = PointAttributes {
-            intensity: None,
-            return_number: None,
-            classification: None,
-            scanner_channel: None,
-            scan_angle: None,
-            user_data: None,
-            point_source_id: None,
-            gps_time: None,
+            intensity: parse_when(sel.intensity, || {
+                parse_numeric_or_default::<u16>(record, &self.field_mapping, "intensity")
+            })?,
+            return_number: parse_when(sel.return_number, || {
+                parse_numeric_or_default::<u8>(record, &self.field_mapping, "return_number")
+            })?,
+            classification: parse_when(sel.classification, || {
+                parse_numeric_or_default::<u8>(record, &self.field_mapping, "classification")
+            })?,
+            scanner_channel: parse_when(sel.scanner_channel, || {
+                parse_numeric_or_default::<u8>(record, &self.field_mapping, "scanner_channel")
+            })?,
+            scan_angle: parse_when(sel.scan_angle, || {
+                parse_f32_or_default(record, &self.field_mapping, "scan_angle")
+            })?,
+            user_data: parse_when(sel.user_data, || {
+                parse_numeric_or_default::<u8>(record, &self.field_mapping, "user_data")
+            })?,
+            point_source_id: parse_when(sel.point_source_id, || {
+                parse_numeric_or_default::<u16>(record, &self.field_mapping, "point_source_id")
+            })?,
+            gps_time: parse_when(sel.gps_time, || {
+                parse_f64_or_default(record, &self.field_mapping, "gps_time")
+            })?,
         };
-        // TODO: To be implemented in the future
-        // let attributes = PointAttributes {
-        //     intensity: parse_optional_field(&record, &field_mapping, "intensity")
-        //         .unwrap_or(None),
-        //     return_number: parse_optional_field(&record, &field_mapping, "return_number")
-        //         .unwrap_or(None),
-        //     classification: get_field_value(&record, &field_mapping, "classification")
-        //         .map(|v| v.to_string()),
-        //     scanner_channel: parse_optional_field(
-        //         &record,
-        //         &field_mapping,
-        //         "scanner_channel",
-        //     )
-        //     .unwrap_or(None),
-        //     scan_angle: parse_optional_field(&record, &field_mapping, "scan_angle")
-        //         .unwrap_or(None),
-        //     user_data: parse_optional_field(&record, &field_mapping, "user_data")
-        //         .unwrap_or(None),
-        //     point_source_id: parse_optional_field(
-        //         &record,
-        //         &field_mapping,
-        //         "point_source_id",
-        //     )
-        //     .unwrap_or(None),
-        //     gps_time: parse_optional_field(&record, &field_mapping, "gps_time")
-        //         .unwrap_or(None),
-        // };
 
         Ok(Point {
             x,
