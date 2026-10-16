@@ -325,14 +325,24 @@ fn extract_tile_coords(file_path: &Path) -> (u8, u32, u32) {
     (z, x, y)
 }
 
+fn collect_bin_files(path: &Path, files: &mut Vec<PathBuf>) {
+    let Ok(entries) = fs::read_dir(path) else {
+        return;
+    };
+    let mut paths: Vec<_> = entries.filter_map(Result::ok).map(|e| e.path()).collect();
+    paths.sort();
+    for path in paths {
+        if path.is_dir() {
+            collect_bin_files(&path, files);
+        } else if path.extension() == Some(OsStr::new("bin")) && path.is_file() {
+            files.push(path);
+        }
+    }
+}
+
 fn get_tile_list_for_zoom(base_path: &Path, z: u8) -> Vec<PathBuf> {
-    let pattern = base_path.join(format!("{}/**/*.bin", z));
     let mut files = Vec::new();
-    files.extend(
-        glob::glob(pattern.to_str().unwrap())
-            .unwrap()
-            .filter_map(Result::ok),
-    );
+    collect_bin_files(&base_path.join(z.to_string()), &mut files);
     files.sort();
     files
 }
@@ -368,13 +378,11 @@ fn extract_shard_coords(file_path: &Path) -> (u8, u32, u32) {
 }
 
 fn group_run_files_by_shard(base_path: &Path, shard_z: u8) -> Vec<((u8, u32, u32), Vec<PathBuf>)> {
-    let pattern = base_path.join(format!("{}/**/*.bin", shard_z));
+    let mut files = Vec::new();
+    collect_bin_files(&base_path.join(shard_z.to_string()), &mut files);
     let mut grouped = HashMap::<(u8, u32, u32), Vec<PathBuf>>::new();
 
-    for file in glob::glob(pattern.to_str().unwrap())
-        .unwrap()
-        .filter_map(Result::ok)
-    {
+    for file in files {
         let shard = extract_shard_coords(&file);
         grouped.entry(shard).or_default().push(file);
     }
