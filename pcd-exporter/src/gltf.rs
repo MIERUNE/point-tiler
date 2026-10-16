@@ -4,16 +4,16 @@ use byteorder::{ByteOrder as _, LittleEndian};
 use cesiumtiles_gltf_json::{
     Accessor, AccessorType, Buffer, BufferExtMeshoptCompression, BufferExtensions, BufferView,
     BufferViewTarget, ComponentType, Gltf, Mesh, MeshPrimitive, Node, Scene,
-    extensions::{
-        gltf::ext_structural_metadata as gltf_structural_metadata,
-        mesh::{MeshPrimitive as MeshPrimitiveExtensions, ext_mesh_features},
-    },
     extensions::buffer_view::{
         BufferViewExtensions, ExtMeshoptCompression, MeshoptCompressionFilter,
         MeshoptCompressionMode,
     },
+    extensions::{
+        gltf::ext_structural_metadata as gltf_structural_metadata,
+        mesh::{MeshPrimitive as MeshPrimitiveExtensions, ext_mesh_features},
+    },
 };
-use pcd_core::pointcloud::point::PointCloud;
+use pcd_core::pointcloud::point::{AttributeSelection, PointCloud};
 
 /// Options for GLB generation
 #[derive(Debug, Clone, Default)]
@@ -21,6 +21,8 @@ pub struct GlbOptions {
     pub quantize: bool,
     pub meshopt: bool,
     pub gzip_compress: bool,
+    /// Point attributes written as `EXT_structural_metadata` properties.
+    pub attributes: AttributeSelection,
 }
 
 pub fn quantize_unsigned_norm(value: f32, bits: i32) -> i32 {
@@ -228,37 +230,26 @@ fn build_vertex_buffer_quantized(points: &PointCloud) -> Result<VertexBufferInfo
     })
 }
 
-fn build_structural_metadata(points: &PointCloud) -> Option<StructuralMetadataInfo> {
+fn build_structural_metadata(
+    points: &PointCloud,
+    selection: &AttributeSelection,
+) -> Result<Option<StructuralMetadataInfo>, Box<dyn Error>> {
     let feature_count = points.points.len() as u32;
-    if feature_count == 0 {
-        return None;
+    if feature_count == 0 || selection.is_empty() {
+        return Ok(None);
     }
 
-    // Readers encode selection as presence: selected fields are always `Some`,
-    // unselected fields are always `None`. That makes attribute presence
-    // consistent across all points, so the first point is enough to detect
-    // which properties exist.
-    let first = &points.points[0].attributes;
-    let has_intensity = first.intensity.is_some();
-    let has_return_number = first.return_number.is_some();
-    let has_classification = first.classification.is_some();
-    let has_scanner_channel = first.scanner_channel.is_some();
-    let has_scan_angle = first.scan_angle.is_some();
-    let has_user_data = first.user_data.is_some();
-    let has_point_source_id = first.point_source_id.is_some();
-    let has_gps_time = first.gps_time.is_some();
-
-    if !(has_intensity
-        || has_return_number
-        || has_classification
-        || has_scanner_channel
-        || has_scan_angle
-        || has_user_data
-        || has_point_source_id
-        || has_gps_time)
-    {
-        return None;
-    }
+    // The set of properties comes from the caller's selection, not from the
+    // points, so every tile of a tileset gets the same columns. A selected
+    // attribute without a value is an error rather than being filled with 0.
+    let has_intensity = selection.intensity;
+    let has_return_number = selection.return_number;
+    let has_classification = selection.classification;
+    let has_scanner_channel = selection.scanner_channel;
+    let has_scan_angle = selection.scan_angle;
+    let has_user_data = selection.user_data;
+    let has_point_source_id = selection.point_source_id;
+    let has_gps_time = selection.gps_time;
 
     let n = points.points.len();
     let mut intensity = Vec::with_capacity(if has_intensity { n * 2 } else { 0 });
@@ -270,33 +261,58 @@ fn build_structural_metadata(points: &PointCloud) -> Option<StructuralMetadataIn
     let mut point_source_id = Vec::with_capacity(if has_point_source_id { n * 2 } else { 0 });
     let mut gps_time = Vec::with_capacity(if has_gps_time { n * 8 } else { 0 });
 
-    for point in &points.points {
+    for (i, point) in points.points.iter().enumerate() {
         let attrs = &point.attributes;
+        let missing =
+            |name: &str| format!("point {i} has no value for selected attribute '{name}'");
 
         if has_intensity {
-            intensity.extend_from_slice(&attrs.intensity.unwrap_or_default().to_le_bytes());
+            let v = attrs.intensity.ok_or_else(|| missing("intensity"))?;
+            intensity.extend_from_slice(&v.to_le_bytes());
         }
         if has_return_number {
-            return_number.push(attrs.return_number.unwrap_or_default());
+            return_number.push(
+                attrs
+                    .return_number
+                    .ok_or_else(|| missing("return_number"))?,
+            );
         }
         if has_classification {
-            classification.push(attrs.classification.unwrap_or_default());
+            classification.push(
+                attrs
+                    .classification
+                    .ok_or_else(|| missing("classification"))?,
+            );
         }
         if has_scanner_channel {
-            scanner_channel.push(attrs.scanner_channel.unwrap_or_default());
+            scanner_channel.push(
+                attrs
+                    .scanner_channel
+                    .ok_or_else(|| missing("scanner_channel"))?,
+            );
         }
         if has_scan_angle {
-            scan_angle.extend_from_slice(&attrs.scan_angle.unwrap_or_default().to_le_bytes());
+            let v = attrs.scan_angle.ok_or_else(|| missing("scan_angle"))?;
+            if !v.is_finite() {
+                return Err(format!("point {i} has a non-finite scan_angle: {v}").into());
+            }
+            scan_angle.extend_from_slice(&v.to_le_bytes());
         }
         if has_user_data {
-            user_data.push(attrs.user_data.unwrap_or_default());
+            user_data.push(attrs.user_data.ok_or_else(|| missing("user_data"))?);
         }
         if has_point_source_id {
-            point_source_id
-                .extend_from_slice(&attrs.point_source_id.unwrap_or_default().to_le_bytes());
+            let v = attrs
+                .point_source_id
+                .ok_or_else(|| missing("point_source_id"))?;
+            point_source_id.extend_from_slice(&v.to_le_bytes());
         }
         if has_gps_time {
-            gps_time.extend_from_slice(&attrs.gps_time.unwrap_or_default().to_le_bytes());
+            let v = attrs.gps_time.ok_or_else(|| missing("gps_time"))?;
+            if !v.is_finite() {
+                return Err(format!("point {i} has a non-finite gps_time: {v}").into());
+            }
+            gps_time.extend_from_slice(&v.to_le_bytes());
         }
     }
 
@@ -398,14 +414,10 @@ fn build_structural_metadata(points: &PointCloud) -> Option<StructuralMetadataIn
         });
     }
 
-    if properties.is_empty() {
-        None
-    } else {
-        Some(StructuralMetadataInfo {
-            feature_count,
-            properties,
-        })
-    }
+    Ok(Some(StructuralMetadataInfo {
+        feature_count,
+        properties,
+    }))
 }
 
 fn append_aligned_bytes(target: &mut Vec<u8>, data: &[u8], alignment: usize) -> (u32, u32) {
@@ -612,10 +624,10 @@ fn assemble_glb<'a>(
         extensions_required.push("EXT_meshopt_compression".to_string());
     }
     if root_extensions.is_some() {
+        // Metadata is optional for rendering, so these are not listed in
+        // extensionsRequired (EXT_mesh_features must not be, per its spec).
         extensions_used.push("EXT_structural_metadata".to_string());
-        extensions_required.push("EXT_structural_metadata".to_string());
         extensions_used.push("EXT_mesh_features".to_string());
-        extensions_required.push("EXT_mesh_features".to_string());
     }
 
     let mut node = Node {
@@ -656,7 +668,7 @@ pub fn generate_glb_with_options<'a>(
     points: PointCloud,
     options: &GlbOptions,
 ) -> Result<cesiumtiles_gltf::glb::Glb<'a>, Box<dyn Error>> {
-    let metadata = build_structural_metadata(&points);
+    let metadata = build_structural_metadata(&points, &options.attributes)?;
     let info = if options.quantize {
         build_vertex_buffer_quantized(&points)?
     } else {
@@ -886,7 +898,11 @@ mod tests {
     #[test]
     fn test_generate_glb_with_structural_metadata() {
         let points = make_test_points_with_attributes();
-        let glb = generate_glb_with_options(points, &GlbOptions::default()).unwrap();
+        let options = GlbOptions {
+            attributes: AttributeSelection::ALL,
+            ..Default::default()
+        };
+        let glb = generate_glb_with_options(points, &options).unwrap();
         let json = parse_glb_json(&glb);
 
         let ext_used: Vec<&str> = json["extensionsUsed"]
@@ -910,7 +926,10 @@ mod tests {
             "point_source_id",
             "gps_time",
         ] {
-            assert!(schema_props.get(key).is_some(), "missing schema property: {key}");
+            assert!(
+                schema_props.get(key).is_some(),
+                "missing schema property: {key}"
+            );
         }
 
         let mesh_ext = &json["meshes"][0]["primitives"][0]["extensions"]["EXT_mesh_features"];
@@ -961,7 +980,14 @@ mod tests {
                 ..Default::default()
             },
         };
-        let glb = generate_glb_with_options(points, &GlbOptions::default()).unwrap();
+        let options = GlbOptions {
+            attributes: AttributeSelection {
+                classification: true,
+                ..Default::default()
+            },
+            ..Default::default()
+        };
+        let glb = generate_glb_with_options(points, &options).unwrap();
         let json = parse_glb_json(&glb);
 
         let byte_length = json["buffers"][0]["byteLength"].as_u64().unwrap();

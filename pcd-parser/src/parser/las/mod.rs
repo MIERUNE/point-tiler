@@ -5,6 +5,7 @@ use las::Reader;
 use pcd_core::pointcloud::point::{Color, EpsgCode, Point, PointAttributes, PointCloud};
 
 use super::{Parser, ParserProvider};
+use crate::reader::las::LasPointReader;
 
 pub struct LasParserProvider {
     pub filenames: Vec<PathBuf>,
@@ -31,6 +32,7 @@ impl Parser for LasParser {
 
         for f in self.filenames.iter() {
             let mut reader = Reader::from_path(f.to_str().unwrap()).unwrap();
+            let format = *reader.header().point_format();
             for las_point in reader.points() {
                 let las_point = las_point.unwrap();
 
@@ -43,7 +45,7 @@ impl Parser for LasParser {
                 let attributes = PointAttributes {
                     intensity: Some(las_point.intensity),
                     return_number: Some(las_point.return_number),
-                    classification: Some(u8::from(las_point.classification)),
+                    classification: Some(LasPointReader::classification_code(&las_point, &format)),
                     scanner_channel: Some(las_point.scanner_channel),
                     scan_angle: Some(las_point.scan_angle),
                     user_data: Some(las_point.user_data),
