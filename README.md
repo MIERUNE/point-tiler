@@ -77,7 +77,7 @@ After installing Rust, download this repository.
 | `--gzip-compress`      | Enable GZIP compression for output tiles                                                                                                                   |
 | `--disable-decimation` | Disable decimation during intermediate file generation and keep original point density                                                                     |
 | `--extra-fields`       | Comma-separated list of extra point attributes to read and embed as GLB metadata (e.g. `--extra-fields classification,intensity`). Valid values: `intensity`, `return-number`, `classification`, `scanner-channel`, `scan-angle`, `user-data`, `point-source-id`, `gps-time`. The flag may also be repeated. |
-| `--all-extra-fields`   | Read and embed all supported extra point attributes. Overrides `--extra-fields`. When neither flag is set, no extra attributes are included.                |
+| `--all-extra-fields`   | Read and embed every supported extra point attribute that all input files contain. Overrides `--extra-fields`. When neither flag is set, no extra attributes are included. |
 
 ### Example
 
@@ -154,7 +154,14 @@ During conversion, temporary intermediate files are generated on disk. In curren
 
 If neither flag is set, no extra attributes are included. Metadata is encoded in GLB using `EXT_structural_metadata` + `EXT_mesh_features`.
 
-When an attribute is selected but missing for a given point (a blank CSV cell, or a LAS point format that does not carry the field), it is embedded with a default value of `0` rather than being omitted.
+A selected attribute must have a value for every point; missing values are never filled with `0`.
+- With `--extra-fields`, conversion fails if an input file does not contain a selected attribute (a LAS point format without the field, or a CSV without the column), or if a CSV cell is blank.
+- With `--all-extra-fields`, only the attributes contained in every input file are embedded. GPS time is absent from LAS point formats 0 and 2, and the scanner channel exists only in point formats 6-10. Conversion fails if an attribute exists in only some of the input files; use `--extra-fields` to select the attributes they share.
+- Invalid values (non-numeric values, NaN or infinity, fractional or out-of-range integers) also make the conversion fail.
+
+`scan_angle` is embedded in degrees. For LAS point formats 6-10 it is the stored value multiplied by 0.006.
+
+The following LAS attributes are not supported and are not included in the output: number of returns, the synthetic, key-point, withheld and overlap flags, scan direction flag, edge of flight line, NIR, waveform data, and Extra Bytes. For point formats 0-5, the overlap classification code 12 is kept as classification 12.
 
 ### Coordinate Systems
 
@@ -183,6 +190,7 @@ In CSV format, `x`, `y`, and `z` are required.
 Color columns are optional (`r,g,b` or `red,green,blue`) and default to white if omitted.
 Additional optional attribute columns are supported: `intensity`, `return_number`, `classification`, `scanner_channel`, `scan_angle`, `user_data`, `point_source_id`, `gps_time`.
 (The case of the letters does not matter.)
+Integer attributes (all except `scan_angle` and `gps_time`) must be whole numbers such as `2` or `2.0`; values such as `2.7` are rejected.
 
 For example, the following data is valid.
 
