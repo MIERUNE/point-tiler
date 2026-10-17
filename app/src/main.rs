@@ -28,7 +28,7 @@ use pcd_parser::reader::PointReader;
 use pcd_parser::reader::csv::CsvPointReader;
 use pcd_parser::reader::las::LasPointReader;
 use rayon::iter::{IntoParallelIterator as _, IntoParallelRefIterator as _, ParallelIterator as _};
-use tempfile::tempdir;
+use tempfile::TempDir;
 use tinymvt::tileid::hilbert;
 
 use pcd_core::pointcloud::point::{Point, PointCloud};
@@ -95,6 +95,10 @@ struct Cli {
     /// files contain. Overrides `--extra-fields`.
     #[arg(long)]
     all_extra_fields: bool,
+
+    /// Directory for intermediate files (defaults to the system temp directory)
+    #[arg(long, value_name = "DIR")]
+    temp_dir: Option<PathBuf>,
 }
 
 #[derive(ValueEnum, Debug, Clone, Copy, PartialEq, Eq)]
@@ -568,14 +572,24 @@ fn extract_tile_coords(file_path: &Path) -> (u8, u32, u32) {
     (z, x, y)
 }
 
+fn collect_bin_files(path: &Path, files: &mut Vec<PathBuf>) {
+    let Ok(entries) = fs::read_dir(path) else {
+        return;
+    };
+    let mut paths: Vec<_> = entries.filter_map(Result::ok).map(|e| e.path()).collect();
+    paths.sort();
+    for path in paths {
+        if path.is_dir() {
+            collect_bin_files(&path, files);
+        } else if path.extension() == Some(OsStr::new("bin")) && path.is_file() {
+            files.push(path);
+        }
+    }
+}
+
 fn get_tile_list_for_zoom(base_path: &Path, z: u8) -> Vec<PathBuf> {
-    let pattern = base_path.join(format!("{}/**/*.bin", z));
     let mut files = Vec::new();
-    files.extend(
-        glob::glob(pattern.to_str().unwrap())
-            .unwrap()
-            .filter_map(Result::ok),
-    );
+    collect_bin_files(&base_path.join(z.to_string()), &mut files);
     files.sort();
     files
 }
@@ -611,13 +625,11 @@ fn extract_shard_coords(file_path: &Path) -> (u8, u32, u32) {
 }
 
 fn group_run_files_by_shard(base_path: &Path, shard_z: u8) -> Vec<((u8, u32, u32), Vec<PathBuf>)> {
-    let pattern = base_path.join(format!("{}/**/*.bin", shard_z));
+    let mut files = Vec::new();
+    collect_bin_files(&base_path.join(shard_z.to_string()), &mut files);
     let mut grouped = HashMap::<(u8, u32, u32), Vec<PathBuf>>::new();
 
-    for file in glob::glob(pattern.to_str().unwrap())
-        .unwrap()
-        .filter_map(Result::ok)
-    {
+    for file in files {
         let shard = extract_shard_coords(&file);
         grouped.entry(shard).or_default().push(file);
     }
@@ -1032,6 +1044,26 @@ fn log_directory_summary(label: &str, base_path: &Path) {
     }
 }
 
+fn create_temp_dir(temp_root: Option<&Path>) -> std::io::Result<TempDir> {
+    match temp_root {
+        Some(dir) => tempfile::tempdir_in(dir),
+        None => tempfile::tempdir(),
+    }
+}
+
+fn validate_temp_dir(temp_root: Option<&Path>) -> std::io::Result<()> {
+    match temp_root {
+        Some(dir) if !dir.is_dir() => Err(std::io::Error::new(
+            ErrorKind::NotFound,
+            format!(
+                "temp dir does not exist or is not a directory: {}",
+                dir.display()
+            ),
+        )),
+        _ => Ok(()),
+    }
+}
+
 fn in_memory_workflow(
     input_files: Vec<PathBuf>,
     args: &Cli,
@@ -1109,7 +1141,7 @@ fn in_memory_workflow(
         start_local.elapsed()
     );
 
-    let tmp_tiled_file_dir_path = tempdir().unwrap();
+    let tmp_tiled_file_dir_path = create_temp_dir(args.temp_dir.as_deref())?;
 
     log::info!("start writing tile files...");
     let start_local = std::time::Instant::now();
@@ -1206,7 +1238,7 @@ fn external_sort_workflow(
 
     let start_local = std::time::Instant::now();
 
-    let tmp_run_file_dir_path = tempdir().unwrap();
+    let tmp_run_file_dir_path = create_temp_dir(args.temp_dir.as_deref())?;
     let mut tile_contents_all = Vec::new();
 
     {
@@ -1367,7 +1399,7 @@ fn external_sort_workflow(
                 format_size(shard_run_bytes)
             );
 
-            let tmp_tiled_file_dir_path = tempdir().unwrap();
+            let tmp_tiled_file_dir_path = create_temp_dir(args.temp_dir.as_deref())?;
             merge_shard_run_files(
                 run_files,
                 tmp_tiled_file_dir_path.path(),
@@ -1506,6 +1538,9 @@ fn main() -> std::io::Result<()> {
     log::info!("disable decimation: {}", args.disable_decimation);
     log::info!("all extra fields: {}", args.all_extra_fields);
     log::info!("extra fields: {:?}", args.extra_fields);
+    log::info!("temp dir: {:?}", args.temp_dir);
+
+    validate_temp_dir(args.temp_dir.as_deref())?;
 
     let start = std::time::Instant::now();
 
@@ -1876,5 +1911,139 @@ mod tests {
         assert_eq!(read_back[2].1.attributes.gps_time, Some(0.0));
         // Unselected attributes stay `None`.
         assert_eq!(read_back[0].1.attributes.intensity, None);
+    }
+
+    fn cli_with_temp_dir(output: &Path, temp_dir: &Path) -> Cli {
+        Cli::try_parse_from([
+            "ptiler",
+            "--input",
+            "unused.csv",
+            "--output",
+            output.to_str().unwrap(),
+            "--input-epsg",
+            "4979",
+            "--output-epsg",
+            "4979",
+            "--min",
+            "15",
+            "--max",
+            "16",
+            "--disable-decimation",
+            "--temp-dir",
+            temp_dir.to_str().unwrap(),
+        ])
+        .unwrap()
+    }
+
+    fn write_sample_csv(dir: &Path) -> PathBuf {
+        let csv_path = dir.join("points.csv");
+        std::fs::write(
+            &csv_path,
+            "x,y,z\n139.76,35.68,40.0\n139.7601,35.6801,41.0\n139.7602,35.6802,42.0\n",
+        )
+        .unwrap();
+        csv_path
+    }
+
+    fn is_empty_dir(dir: &Path) -> bool {
+        std::fs::read_dir(dir).unwrap().next().is_none()
+    }
+
+    #[test]
+    fn cli_parses_temp_dir() {
+        let dir = tempdir().unwrap();
+        let args = cli_with_temp_dir(&dir.path().join("out"), dir.path());
+        assert_eq!(args.temp_dir.as_deref(), Some(dir.path()));
+    }
+
+    #[test]
+    fn validate_temp_dir_rejects_missing_dir() {
+        let dir = tempdir().unwrap();
+        let missing = dir.path().join("missing");
+
+        let file = dir.path().join("file");
+        std::fs::write(&file, "").unwrap();
+
+        assert!(validate_temp_dir(Some(&missing)).is_err());
+        assert!(validate_temp_dir(Some(&file)).is_err());
+        assert!(validate_temp_dir(Some(dir.path())).is_ok());
+        assert!(validate_temp_dir(None).is_ok());
+    }
+
+    #[test]
+    fn create_temp_dir_creates_inside_given_root() {
+        let root = tempdir().unwrap();
+        let temp = create_temp_dir(Some(root.path())).unwrap();
+
+        assert_eq!(temp.path().parent(), Some(root.path()));
+        assert!(temp.path().is_dir());
+    }
+
+    #[test]
+    fn in_memory_workflow_uses_and_cleans_temp_dir() {
+        let dir = tempdir().unwrap();
+        let temp_root = dir.path().join("work");
+        std::fs::create_dir_all(&temp_root).unwrap();
+        let output = dir.path().join("out");
+        std::fs::create_dir_all(&output).unwrap();
+        let csv_path = write_sample_csv(dir.path());
+        let args = cli_with_temp_dir(&output, &temp_root);
+
+        in_memory_workflow(
+            vec![csv_path.clone()],
+            &args,
+            &output,
+            AttributeSelection::default(),
+        )
+        .unwrap();
+
+        assert!(output.join("tileset.json").exists());
+        assert!(is_empty_dir(&temp_root));
+
+        // A non-directory temp root must make the workflow fail, proving it is used.
+        let args = cli_with_temp_dir(&output, &csv_path);
+        assert!(
+            in_memory_workflow(
+                vec![csv_path.clone()],
+                &args,
+                &output,
+                AttributeSelection::default(),
+            )
+            .is_err()
+        );
+    }
+
+    #[test]
+    fn external_sort_workflow_uses_and_cleans_temp_dir() {
+        let dir = tempdir().unwrap();
+        let temp_root = dir.path().join("work");
+        std::fs::create_dir_all(&temp_root).unwrap();
+        let output = dir.path().join("out");
+        std::fs::create_dir_all(&output).unwrap();
+        let csv_path = write_sample_csv(dir.path());
+        let args = cli_with_temp_dir(&output, &temp_root);
+
+        external_sort_workflow(
+            vec![csv_path.clone()],
+            &args,
+            &output,
+            AttributeSelection::default(),
+        )
+        .unwrap();
+
+        assert!(output.join("tileset.json").exists());
+        assert!(is_empty_dir(&temp_root));
+
+        // A non-directory temp root must make the workflow fail, proving it is used.
+        let args = cli_with_temp_dir(&output, &csv_path);
+        assert!(
+            external_sort_workflow(
+                vec![csv_path.clone()],
+                &args,
+                &output,
+                AttributeSelection::default(),
+            )
+            .is_err()
+        );
     }
 }

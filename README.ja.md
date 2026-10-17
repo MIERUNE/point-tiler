@@ -78,6 +78,7 @@ Rust をインストールした後、このリポジトリをダウンロード
 | `--disable-decimation` | 中間ファイル生成時の decimation を無効化し、元の点密度を保持する                                                              |
 | `--extra-fields`       | GLB メタデータとして読み込む追加の点属性をカンマ区切りで指定（例: `--extra-fields classification,intensity`）。指定可能な値: `intensity`, `return-number`, `classification`, `scanner-channel`, `scan-angle`, `user-data`, `point-source-id`, `gps-time`。フラグの複数指定も可能。 |
 | `--all-extra-fields`   | サポートされる追加点属性のうち、すべての入力ファイルが持つものを読み込み埋め込む。`--extra-fields` より優先される。どちらも指定しない場合、追加属性は含まれない。 |
+| `--temp-dir`           | 中間ファイルを置く既存のディレクトリ（デフォルト: システムの一時ディレクトリ）                                                |
 
 ### 使用例
 
@@ -139,6 +140,8 @@ ptiler --input /path/to/data/*.las \
 この余裕分は、点群バッファ、grouping 用データ構造、並列処理中の中間アロケーションにより、実際の RSS が生の点群サイズを大きく上回るためです。
 
 変換中には一時的な中間ファイルがディスク上に生成されます。現在のベンチマークでは、そのピークサイズは入力 LAS サイズの概ね 1.2 倍から 1.5 倍程度で、処理完了後に自動で削除されます。
+
+中間ファイルは、デフォルトではシステムの一時ディレクトリ（Linux/macOS は `TMPDIR`、未設定なら `/tmp`。Windows は `TMP`/`TEMP`）に書き込まれます。そのドライブの空き容量が足りない場合は、`--temp-dir` で別のドライブを指定してください。指定するディレクトリは事前に作成しておく必要があります。
 
 ### 属性
 

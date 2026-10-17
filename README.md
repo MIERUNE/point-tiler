@@ -78,6 +78,7 @@ After installing Rust, download this repository.
 | `--disable-decimation` | Disable decimation during intermediate file generation and keep original point density                                                                     |
 | `--extra-fields`       | Comma-separated list of extra point attributes to read and embed as GLB metadata (e.g. `--extra-fields classification,intensity`). Valid values: `intensity`, `return-number`, `classification`, `scanner-channel`, `scan-angle`, `user-data`, `point-source-id`, `gps-time`. The flag may also be repeated. |
 | `--all-extra-fields`   | Read and embed every supported extra point attribute that all input files contain. Overrides `--extra-fields`. When neither flag is set, no extra attributes are included. |
+| `--temp-dir`           | Existing directory for temporary intermediate files (default: the system temp directory)                                                                   |
 
 ### Example
 
@@ -139,6 +140,8 @@ ptiler --input /path/to/data/*.las \
 This headroom accounts for point buffers, grouping structures, and parallel intermediate allocations that can make actual RSS significantly larger than the raw point data size.
 
 During conversion, temporary intermediate files are generated on disk. In current benchmarks, their peak size is typically around 1.2x to 1.5x the input LAS size, and they are deleted automatically after processing finishes.
+
+By default, intermediate files are written to the system temp directory (`TMPDIR` on Linux/macOS, or `/tmp` if unset; `TMP`/`TEMP` on Windows). If that drive does not have enough free space, use `--temp-dir` to place them on another drive. The directory must already exist.
 
 ### Attributes
 
