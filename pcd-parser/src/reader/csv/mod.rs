@@ -2,7 +2,7 @@ use std::{
     collections::HashMap,
     error::Error,
     fs::File,
-    io,
+    io::{self, BufReader, Read, Seek, SeekFrom},
     path::{Path, PathBuf},
 };
 
@@ -337,7 +337,26 @@ impl PointReader for CsvPointReader {
             match reader.read_record(&mut record) {
                 Ok(true) => {
                     return self.parse_point(&record).map(Some).map_err(|e| {
-                        let line = record.position().map_or(0, |p| p.line());
+                        // csv may leave the LF of a CRLF terminator (and
+                        // empty lines) at the recorded start position, so
+                        // count them to report the physical line. If the file
+                        // cannot be reread, keep the line csv recorded.
+                        let line = record.position().map_or(0, |position| {
+                            let count_newlines = || -> io::Result<u64> {
+                                let mut source = BufReader::new(File::open(&self.current_path)?);
+                                source.seek(SeekFrom::Start(position.byte()))?;
+                                let mut newlines = 0;
+                                for byte in source.bytes() {
+                                    match byte? {
+                                        b'\n' => newlines += 1,
+                                        b'\r' => {}
+                                        _ => break,
+                                    }
+                                }
+                                Ok(newlines)
+                            };
+                            position.line() + count_newlines().unwrap_or(0)
+                        });
                         io::Error::other(format!("{}:{}: {}", self.current_path.display(), line, e))
                     });
                 }
