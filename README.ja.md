@@ -76,6 +76,8 @@ Rust をインストールした後、このリポジトリをダウンロード
 | `--meshopt`            | meshopt 圧縮を有効化（`EXT_meshopt_compression`）                                                                             |
 | `--gzip-compress`      | 出力タイルの GZIP 圧縮を有効化                                                                                                |
 | `--disable-decimation` | 中間ファイル生成時の decimation を無効化し、元の点密度を保持する                                                              |
+| `--extra-fields`       | GLB メタデータとして読み込む追加の点属性をカンマ区切りで指定（例: `--extra-fields classification,intensity`）。指定可能な値: `intensity`, `return-number`, `classification`, `scanner-channel`, `scan-angle`, `user-data`, `point-source-id`, `gps-time`。フラグの複数指定も可能。 |
+| `--all-extra-fields`   | サポートされる追加点属性のうち、すべての入力ファイルが持つものを読み込み埋め込む。`--extra-fields` より優先される。どちらも指定しない場合、追加属性は含まれない。 |
 | `--temp-dir`           | 中間ファイルを置く既存のディレクトリ（デフォルト: システムの一時ディレクトリ）                                                |
 
 ### 使用例
@@ -91,7 +93,8 @@ ptiler --input app/examples/data/sample.las \
     --threads 8 \
     --quantize \
     --meshopt \
-    --gzip-compress
+    --gzip-compress \
+    --extra-fields classification,intensity
 ```
 
 ### ベンチマーク
@@ -142,7 +145,28 @@ ptiler --input /path/to/data/*.las \
 
 ### 属性
 
-現状の 3D Tiles 出力で使われるのは XYZ と RGB のみです。intensity、return number、classification、scan angle、point source ID、GPS time などの属性は GLB 生成時には無視されます。
+3D Tiles 出力には常に XYZ/RGB が含まれます。追加の点属性は `--extra-fields`（または `--all-extra-fields`）でオプトイン指定した場合のみ、メタデータとして埋め込まれます。
+- intensity
+- return number
+- classification
+- scanner channel
+- scan angle
+- user data
+- point source ID
+- GPS time
+
+どちらのフラグも指定しない場合、追加属性は含まれません。メタデータは GLB 内で `EXT_structural_metadata` と `EXT_mesh_features` を使って出力されます。
+
+選択した属性は、すべての点に値がある必要があります。値がない場合に `0` で埋めることはしません。
+- `--extra-fields` では、選択した属性を入力ファイルが持たない場合（その項目を持たない LAS の点フォーマットや、その列がない CSV）や、CSV のセルが空の場合は、変換がエラーになります。
+- `--all-extra-fields` では、すべての入力ファイルが持つ属性だけを埋め込みます。GPS 時刻は LAS の点フォーマット 0 と 2 にはなく、スキャナーチャンネルは点フォーマット 6〜10 にしかありません。一部の入力ファイルにしかない属性がある場合は変換がエラーになるため、`--extra-fields` で共通の属性を選んでください。
+- 不正な値（数値でない値、NaN や無限大、小数や範囲外の整数）も、変換がエラーになります。
+
+`scan_angle` は度単位で埋め込みます。LAS の点フォーマット 6〜10 では、格納されている値に 0.006 を掛けた値です。
+
+次の LAS の属性には対応しておらず、出力に含まれません: リターン数、synthetic・key-point・withheld・overlap の各フラグ、スキャン方向フラグ、飛行ラインの端、NIR、波形データ、Extra Bytes。点フォーマット 0〜5 のオーバーラップの分類コード 12 は、分類 12 のまま出力します。
+
+点フォーマット 6〜10 の分類 12（LAS 1.4 では予約値）は、読み込みに使う `las` クレートが「分類 1＋overlap フラグ」として読むため、分類 1 として出力します。
 
 ### 座標系
 
@@ -167,9 +191,11 @@ ptiler --input /path/to/data/*.las \
 
 .csv と .txt のファイル拡張子に対応しています。
 
-CSV 形式では、XYZRGB 以外のカラムは無視されます。
-また、カラム名は "x"、"y"、"z" および "r"、"g"、"b" または "red"、"green"、"blue" である必要があります。
+CSV 形式では `x`、`y`、`z` が必須です。
+色カラム（`r,g,b` または `red,green,blue`）は任意で、省略時は白として扱われます。
+追加の任意属性カラムとして `intensity`、`return_number`、`classification`、`scanner_channel`、`scan_angle`、`user_data`、`point_source_id`、`gps_time` をサポートします。
 （大文字・小文字は区別しません。）
+整数の属性（`scan_angle` と `gps_time` 以外）は、`2` や `2.0` のような整数値である必要があります。`2.7` のような値はエラーになります。
 
 例えば、以下のようなデータが有効です。
 

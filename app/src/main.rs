@@ -12,7 +12,7 @@ use std::{
 
 use bitcode::{Decode, Encode};
 use chrono::Local;
-use clap::Parser;
+use clap::{Parser, ValueEnum};
 use env_logger::Builder;
 use glob::glob;
 // use gzp::MgzipSyncReader;
@@ -22,6 +22,7 @@ use glob::glob;
 // };
 use coordinate_transformer::{EPSG_WGS84_GEOCENTRIC, EPSG_WGS84_GEOGRAPHIC_3D, PointTransformer};
 use log::LevelFilter;
+use pcd_core::pointcloud::point::AttributeSelection;
 use pcd_exporter::gltf::GlbOptions;
 use pcd_parser::reader::PointReader;
 use pcd_parser::reader::csv::CsvPointReader;
@@ -82,9 +83,53 @@ struct Cli {
     #[arg(long)]
     disable_decimation: bool,
 
+    /// Extra point attributes to read and embed as GLB metadata.
+    /// Accepts a comma-separated list and/or repeated flags, e.g.
+    /// `--extra-fields classification,intensity`. Ignored when
+    /// `--all-extra-fields` is set. When neither is set, no extra
+    /// attributes are included.
+    #[arg(long, value_enum, value_delimiter = ',', num_args = 1..)]
+    extra_fields: Vec<ExtraField>,
+
+    /// Embed all supported extra point attributes shared by every input file.
+    /// Errors if any attribute exists in only some inputs; use `--extra-fields`
+    /// to select shared attributes. Overrides `--extra-fields`.
+    #[arg(long)]
+    all_extra_fields: bool,
+
     /// Directory for intermediate files (defaults to the system temp directory)
     #[arg(long, value_name = "DIR")]
     temp_dir: Option<PathBuf>,
+}
+
+#[derive(ValueEnum, Debug, Clone, Copy, PartialEq, Eq)]
+enum ExtraField {
+    Intensity,
+    ReturnNumber,
+    Classification,
+    ScannerChannel,
+    ScanAngle,
+    UserData,
+    PointSourceId,
+    GpsTime,
+}
+
+impl Cli {
+    /// Attributes named with `--extra-fields`. `--all-extra-fields` is resolved
+    /// against the input files by `resolve_attribute_selection`.
+    fn requested_attributes(&self) -> AttributeSelection {
+        let selected = |field| self.extra_fields.contains(&field);
+        AttributeSelection {
+            intensity: selected(ExtraField::Intensity),
+            return_number: selected(ExtraField::ReturnNumber),
+            classification: selected(ExtraField::Classification),
+            scanner_channel: selected(ExtraField::ScannerChannel),
+            scan_angle: selected(ExtraField::ScanAngle),
+            user_data: selected(ExtraField::UserData),
+            point_source_id: selected(ExtraField::PointSourceId),
+            gps_time: selected(ExtraField::GpsTime),
+        }
+    }
 }
 
 const IN_MEMORY_WORKFLOW_MULTIPLIER: u64 = 5;
@@ -97,9 +142,34 @@ struct CompactPoint {
     r: u16,
     g: u16,
     b: u16,
+    intensity: u16,
+    return_number: u8,
+    classification: u8,
+    scanner_channel: u8,
+    scan_angle: f32,
+    user_data: u8,
+    point_source_id: u16,
+    gps_time: f64,
 }
 
-const RUN_RECORD_BYTES: usize = 8 + (8 * 3) + (2 * 3);
+// Total run-record size: the fixed prefix (tile_id + x,y,z + r,g,b) followed by
+// the selected attributes. The selection is chosen once from the CLI and is
+// identical for every point, so this is computed once and reused for every read
+// and write.
+fn run_record_bytes(selection: &AttributeSelection) -> usize {
+    let attr = |present: bool, size: usize| if present { size } else { 0 };
+    8 // tile_id (u64)
+        + 8 * 3 // x, y, z (f64)
+        + 2 * 3 // r, g, b (u16)
+        + attr(selection.intensity, 2)
+        + attr(selection.return_number, 1)
+        + attr(selection.classification, 1)
+        + attr(selection.scanner_channel, 1)
+        + attr(selection.scan_angle, 4)
+        + attr(selection.user_data, 1)
+        + attr(selection.point_source_id, 2)
+        + attr(selection.gps_time, 8)
+}
 
 impl From<Point> for CompactPoint {
     fn from(point: Point) -> Self {
@@ -110,47 +180,96 @@ impl From<Point> for CompactPoint {
             r: point.color.r,
             g: point.color.g,
             b: point.color.b,
+            intensity: point.attributes.intensity.unwrap_or_default(),
+            return_number: point.attributes.return_number.unwrap_or_default(),
+            classification: point.attributes.classification.unwrap_or_default(),
+            scanner_channel: point.attributes.scanner_channel.unwrap_or_default(),
+            scan_angle: point.attributes.scan_angle.unwrap_or_default(),
+            user_data: point.attributes.user_data.unwrap_or_default(),
+            point_source_id: point.attributes.point_source_id.unwrap_or_default(),
+            gps_time: point.attributes.gps_time.unwrap_or_default(),
         }
     }
 }
 
-impl From<CompactPoint> for Point {
-    fn from(point: CompactPoint) -> Self {
-        Self {
-            x: point.x,
-            y: point.y,
-            z: point.z,
+impl CompactPoint {
+    /// Reconstructs a `Point`, marking each attribute `Some` iff it was selected.
+    /// Presence is uniform across a run (readers emit `Some` for every selected
+    /// field), so the CLI selection is the single source of truth.
+    fn into_point(self, selection: &AttributeSelection) -> Point {
+        Point {
+            x: self.x,
+            y: self.y,
+            z: self.z,
             color: pcd_core::pointcloud::point::Color {
-                r: point.r,
-                g: point.g,
-                b: point.b,
+                r: self.r,
+                g: self.g,
+                b: self.b,
             },
             attributes: pcd_core::pointcloud::point::PointAttributes {
-                intensity: None,
-                return_number: None,
-                classification: None,
-                scanner_channel: None,
-                scan_angle: None,
-                user_data: None,
-                point_source_id: None,
-                gps_time: None,
+                intensity: selection.intensity.then_some(self.intensity),
+                return_number: selection.return_number.then_some(self.return_number),
+                classification: selection.classification.then_some(self.classification),
+                scanner_channel: selection.scanner_channel.then_some(self.scanner_channel),
+                scan_angle: selection.scan_angle.then_some(self.scan_angle),
+                user_data: selection.user_data.then_some(self.user_data),
+                point_source_id: selection.point_source_id.then_some(self.point_source_id),
+                gps_time: selection.gps_time.then_some(self.gps_time),
             },
         }
     }
 }
 
-fn write_run_file(path: &Path, records: &[(SortKey, CompactPoint)]) -> std::io::Result<()> {
+fn write_run_file(
+    path: &Path,
+    records: &[(SortKey, CompactPoint)],
+    selection: &AttributeSelection,
+) -> std::io::Result<()> {
     let file = File::create(path)?;
     let mut writer = BufWriter::new(file);
 
+    // Every record has the same, fixed layout driven by the CLI selection, so
+    // the scratch buffer is sized once and each record is assembled with a
+    // single `write_all`.
+    let mut buf = Vec::with_capacity(run_record_bytes(selection));
     for (key, point) in records {
-        writer.write_all(&key.tile_id.to_le_bytes())?;
-        writer.write_all(&point.x.to_le_bytes())?;
-        writer.write_all(&point.y.to_le_bytes())?;
-        writer.write_all(&point.z.to_le_bytes())?;
-        writer.write_all(&point.r.to_le_bytes())?;
-        writer.write_all(&point.g.to_le_bytes())?;
-        writer.write_all(&point.b.to_le_bytes())?;
+        buf.clear();
+        buf.extend_from_slice(&key.tile_id.to_le_bytes());
+        buf.extend_from_slice(&point.x.to_le_bytes());
+        buf.extend_from_slice(&point.y.to_le_bytes());
+        buf.extend_from_slice(&point.z.to_le_bytes());
+        buf.extend_from_slice(&point.r.to_le_bytes());
+        buf.extend_from_slice(&point.g.to_le_bytes());
+        buf.extend_from_slice(&point.b.to_le_bytes());
+
+        // A fixed slot is written for every selected attribute (never gated on
+        // per-point presence), so all records are exactly `run_record_bytes`.
+        if selection.intensity {
+            buf.extend_from_slice(&point.intensity.to_le_bytes());
+        }
+        if selection.return_number {
+            buf.extend_from_slice(&point.return_number.to_le_bytes());
+        }
+        if selection.classification {
+            buf.extend_from_slice(&point.classification.to_le_bytes());
+        }
+        if selection.scanner_channel {
+            buf.extend_from_slice(&point.scanner_channel.to_le_bytes());
+        }
+        if selection.scan_angle {
+            buf.extend_from_slice(&point.scan_angle.to_le_bytes());
+        }
+        if selection.user_data {
+            buf.extend_from_slice(&point.user_data.to_le_bytes());
+        }
+        if selection.point_source_id {
+            buf.extend_from_slice(&point.point_source_id.to_le_bytes());
+        }
+        if selection.gps_time {
+            buf.extend_from_slice(&point.gps_time.to_le_bytes());
+        }
+
+        writer.write_all(&buf)?;
     }
 
     writer.flush()?;
@@ -160,33 +279,91 @@ fn write_run_file(path: &Path, records: &[(SortKey, CompactPoint)]) -> std::io::
 struct RunFileReader {
     path: PathBuf,
     reader: BufReader<File>,
+    record: Vec<u8>,
+    selection: AttributeSelection,
 }
 
 impl RunFileReader {
-    fn open(path: PathBuf) -> std::io::Result<Self> {
+    fn open(path: PathBuf, selection: AttributeSelection) -> std::io::Result<Self> {
         let file = File::open(&path)?;
         Ok(Self {
             path,
             reader: BufReader::new(file),
+            record: vec![0u8; run_record_bytes(&selection)],
+            selection,
         })
     }
 
+    #[allow(unused_assignments)]
     fn next_record(&mut self) -> std::io::Result<Option<(SortKey, CompactPoint)>> {
-        let mut record = [0u8; RUN_RECORD_BYTES];
-        match self.reader.read_exact(&mut record) {
+        // The record size is fixed for every point in the run (driven by the
+        // selection), so the whole record is read in a single `read_exact` into
+        // a reused buffer.
+        let record = &mut self.record;
+        let selection = &self.selection;
+        match self.reader.read_exact(record) {
             Ok(()) => {
-                let key = SortKey {
-                    tile_id: u64::from_le_bytes(record[0..8].try_into().unwrap()),
-                };
+                let mut offset = 0;
+                // Takes the next `n` bytes at the cursor and advances past them.
+                macro_rules! read_next {
+                    ($n:expr) => {{
+                        let bytes = record[offset..offset + $n].try_into().unwrap();
+                        offset += $n;
+                        bytes
+                    }};
+                }
+
+                let tile_id = u64::from_le_bytes(read_next!(8));
+
                 let point = CompactPoint {
-                    x: f64::from_le_bytes(record[8..16].try_into().unwrap()),
-                    y: f64::from_le_bytes(record[16..24].try_into().unwrap()),
-                    z: f64::from_le_bytes(record[24..32].try_into().unwrap()),
-                    r: u16::from_le_bytes(record[32..34].try_into().unwrap()),
-                    g: u16::from_le_bytes(record[34..36].try_into().unwrap()),
-                    b: u16::from_le_bytes(record[36..38].try_into().unwrap()),
+                    x: f64::from_le_bytes(read_next!(8)),
+                    y: f64::from_le_bytes(read_next!(8)),
+                    z: f64::from_le_bytes(read_next!(8)),
+                    r: u16::from_le_bytes(read_next!(2)),
+                    g: u16::from_le_bytes(read_next!(2)),
+                    b: u16::from_le_bytes(read_next!(2)),
+                    intensity: if selection.intensity {
+                        u16::from_le_bytes(read_next!(2))
+                    } else {
+                        0
+                    },
+                    return_number: if selection.return_number {
+                        u8::from_le_bytes(read_next!(1))
+                    } else {
+                        0
+                    },
+                    classification: if selection.classification {
+                        u8::from_le_bytes(read_next!(1))
+                    } else {
+                        0
+                    },
+                    scanner_channel: if selection.scanner_channel {
+                        u8::from_le_bytes(read_next!(1))
+                    } else {
+                        0
+                    },
+                    scan_angle: if selection.scan_angle {
+                        f32::from_le_bytes(read_next!(4))
+                    } else {
+                        0.0
+                    },
+                    user_data: if selection.user_data {
+                        u8::from_le_bytes(read_next!(1))
+                    } else {
+                        0
+                    },
+                    point_source_id: if selection.point_source_id {
+                        u16::from_le_bytes(read_next!(2))
+                    } else {
+                        0
+                    },
+                    gps_time: if selection.gps_time {
+                        f64::from_le_bytes(read_next!(8))
+                    } else {
+                        0.0
+                    },
                 };
-                Ok(Some((key, point)))
+                Ok(Some((SortKey { tile_id }, point)))
             }
             Err(error) if error.kind() == ErrorKind::UnexpectedEof => Ok(None),
             Err(error) => Err(error),
@@ -227,6 +404,77 @@ impl PartialEq for HeapItem {
 }
 
 impl Eq for HeapItem {}
+
+/// Decides which extra attributes to read and embed. Attributes named with
+/// `--extra-fields` must exist in every input file. `--all-extra-fields` selects
+/// the attributes that every input file has, and fails if an attribute exists
+/// in only some of them, since those points would have no value for it.
+fn resolve_attribute_selection(
+    args: &Cli,
+    input_files: &[PathBuf],
+    extension: Extension,
+) -> std::io::Result<AttributeSelection> {
+    if !args.all_extra_fields {
+        // Opening each file with the requested selection reports a missing
+        // attribute together with the LAS point format or the CSV header.
+        let requested = args.requested_attributes();
+        input_files
+            .par_iter()
+            .try_for_each(|file| match extension {
+                Extension::Las | Extension::Laz => {
+                    LasPointReader::new(vec![file.clone()], requested)?.open_next_file()
+                }
+                Extension::Csv | Extension::Txt => {
+                    CsvPointReader::new(vec![file.clone()], requested).map(|_| ())
+                }
+            })?;
+        return Ok(requested);
+    }
+
+    let available: Vec<(&PathBuf, AttributeSelection)> = input_files
+        .par_iter()
+        .map(|file| {
+            let attributes = match extension {
+                Extension::Las | Extension::Laz => LasPointReader::probe_attributes(file),
+                Extension::Csv | Extension::Txt => CsvPointReader::probe_attributes(file),
+            }?;
+            Ok((file, attributes))
+        })
+        .collect::<std::io::Result<_>>()?;
+
+    let common = available
+        .iter()
+        .fold(AttributeSelection::ALL, |acc, (_, a)| acc.intersection(a));
+    let present = available
+        .iter()
+        .fold(AttributeSelection::default(), |acc, (_, a)| acc.union(a));
+    let partial = present.difference(&common);
+    if !partial.is_empty() {
+        let lacking: Vec<String> = available
+            .iter()
+            .filter_map(|(file, a)| {
+                let missing = partial.difference(a);
+                (!missing.is_empty())
+                    .then(|| format!("{} lacks {}", file.display(), missing.names().join(", ")))
+            })
+            .collect();
+        return Err(std::io::Error::other(format!(
+            "--all-extra-fields: attribute(s) {} exist in only some input files ({}). \
+             Use --extra-fields to select attributes present in every input file.",
+            partial.names().join(", "),
+            lacking.join("; ")
+        )));
+    }
+
+    let absent = AttributeSelection::ALL.difference(&present);
+    if !absent.is_empty() {
+        log::info!(
+            "--all-extra-fields: not present in the input files, skipped: {:?}",
+            absent.names()
+        );
+    }
+    Ok(common)
+}
 
 fn check_and_get_extension(paths: &[PathBuf]) -> Result<Extension, String> {
     let mut extensions = vec![];
@@ -648,12 +896,13 @@ fn merge_shard_run_files(
     run_files: Vec<PathBuf>,
     output_base_path: &Path,
     disable_decimation: bool,
+    selection: AttributeSelection,
 ) -> std::io::Result<()> {
     let mut readers = Vec::<Option<RunFileReader>>::new();
     let mut heap = BinaryHeap::<HeapItem>::new();
 
     for path in run_files {
-        let mut reader = RunFileReader::open(path)?;
+        let mut reader = RunFileReader::open(path, selection)?;
         let reader_index = readers.len();
         match reader.next_record()? {
             Some((key, point)) => {
@@ -688,7 +937,7 @@ fn merge_shard_run_files(
             current_tile_id = Some(item.key.tile_id);
         }
 
-        tile_points.push(Point::from(item.point));
+        tile_points.push(item.point.into_point(&selection));
 
         if let Some(reader) = readers[item.reader_index].as_mut() {
             match reader.next_record()? {
@@ -820,6 +1069,7 @@ fn in_memory_workflow(
     input_files: Vec<PathBuf>,
     args: &Cli,
     output_path: &Path,
+    selection: AttributeSelection,
 ) -> std::io::Result<()> {
     let extension = check_and_get_extension(&input_files).unwrap();
 
@@ -829,26 +1079,27 @@ fn in_memory_workflow(
     let epsg_in = args.input_epsg;
     let epsg_out = args.output_epsg;
 
-    // Read multiple files in parallel
-    let mut all_points: Vec<Point> = input_files
+    // Read multiple files in parallel; any read error aborts the conversion.
+    let points_per_file: Vec<Vec<Point>> = input_files
         .par_iter()
-        .flat_map(|file| {
+        .map(|file| -> std::io::Result<Vec<Point>> {
             let mut reader: Box<dyn PointReader> = match extension {
                 Extension::Las | Extension::Laz => {
-                    Box::new(LasPointReader::new(vec![file.clone()]).unwrap())
+                    Box::new(LasPointReader::new(vec![file.clone()], selection)?)
                 }
                 Extension::Csv | Extension::Txt => {
-                    Box::new(CsvPointReader::new(vec![file.clone()]).unwrap())
+                    Box::new(CsvPointReader::new(vec![file.clone()], selection)?)
                 }
             };
 
             let mut points = Vec::new();
-            while let Ok(Some(p)) = reader.next_point() {
+            while let Some(p) = reader.next_point()? {
                 points.push(p);
             }
-            points
+            Ok(points)
         })
-        .collect();
+        .collect::<std::io::Result<_>>()?;
+    let mut all_points: Vec<Point> = points_per_file.into_iter().flatten().collect();
 
     // Coordinate transformation
     let mut transformer = PointTransformer::new(epsg_in, epsg_out, None)
@@ -938,6 +1189,7 @@ fn in_memory_workflow(
         quantize: args.quantize,
         meshopt: args.meshopt,
         gzip_compress: args.gzip_compress,
+        attributes: selection,
     };
 
     let tile_contents = export_tiles_to_glb(
@@ -981,6 +1233,7 @@ fn external_sort_workflow(
     input_files: Vec<PathBuf>,
     args: &Cli,
     output_path: &Path,
+    selection: AttributeSelection,
 ) -> std::io::Result<()> {
     log::info!("start parse and transform and tiling...");
 
@@ -1005,7 +1258,6 @@ fn external_sort_workflow(
         let extension = check_and_get_extension(&input_files).unwrap();
         let epsg_in = args.input_epsg;
         let epsg_out = args.output_epsg;
-
         log::info!("memory budget: {}", format_size(max_memory_mb_bytes as u64));
         log::info!("reader chunk target: {}", format_size(one_chunk_mem as u64));
         log::info!("channel_capacity: {}", channel_capacity);
@@ -1022,7 +1274,7 @@ fn external_sort_workflow(
             let tx = tx.clone();
             let extension_copy = extension;
 
-            let handle = thread::spawn(move || {
+            let handle = thread::spawn(move || -> std::io::Result<()> {
                 // Create a transformer per thread
                 let mut transformer = PointTransformer::new(epsg_in, epsg_out, None)
                     .expect("Failed to create transformer");
@@ -1030,14 +1282,14 @@ fn external_sort_workflow(
                 let mut buffer = Vec::with_capacity(default_chunk_points_len);
                 let mut reader: Box<dyn PointReader> = match extension_copy {
                     Extension::Las | Extension::Laz => {
-                        Box::new(LasPointReader::new(chunk).unwrap())
+                        Box::new(LasPointReader::new(chunk, selection)?)
                     }
                     Extension::Csv | Extension::Txt => {
-                        Box::new(CsvPointReader::new(chunk).unwrap())
+                        Box::new(CsvPointReader::new(chunk, selection)?)
                     }
                 };
 
-                while let Ok(Some(p)) = reader.next_point() {
+                while let Some(p) = reader.next_point()? {
                     buffer.push(p);
                     if buffer.len() >= default_chunk_points_len {
                         // Transform coordinates in batch
@@ -1060,6 +1312,7 @@ fn external_sort_workflow(
                         .expect("Failed to transform points");
                     let _ = tx.send(buffer);
                 }
+                Ok(())
             });
             handles.push(handle);
         }
@@ -1090,12 +1343,12 @@ fn external_sort_workflow(
                     shard_z, shard_x, shard_y, current_run_index
                 ));
                 fs::create_dir_all(run_file_path.parent().unwrap()).unwrap();
-                write_run_file(&run_file_path, &keyed_points).unwrap();
+                write_run_file(&run_file_path, &keyed_points, &selection).unwrap();
             }
         }
 
         for handle in handles {
-            handle.join().expect("Reading thread panicked");
+            handle.join().expect("Reading thread panicked")?;
         }
 
         log::info!(
@@ -1123,6 +1376,7 @@ fn external_sort_workflow(
             quantize: args.quantize,
             meshopt: args.meshopt,
             gzip_compress: args.gzip_compress,
+            attributes: selection,
         };
 
         for (index, (shard, run_files)) in shard_runs.into_iter().enumerate() {
@@ -1151,6 +1405,7 @@ fn external_sort_workflow(
                 run_files,
                 tmp_tiled_file_dir_path.path(),
                 args.disable_decimation,
+                selection,
             )?;
             log_directory_summary(
                 "tile files after shard sort",
@@ -1282,6 +1537,8 @@ fn main() -> std::io::Result<()> {
     log::info!("gzip compress: {}", args.gzip_compress);
     log::info!("meshopt: {}", args.meshopt);
     log::info!("disable decimation: {}", args.disable_decimation);
+    log::info!("all extra fields: {}", args.all_extra_fields);
+    log::info!("extra fields: {:?}", args.extra_fields);
     log::info!("temp dir: {:?}", args.temp_dir);
 
     validate_temp_dir(args.temp_dir.as_deref())?;
@@ -1309,12 +1566,15 @@ fn main() -> std::io::Result<()> {
         format_size(max_memory_bytes)
     );
 
+    let selection = resolve_attribute_selection(&args, &input_files, extension)?;
+    log::info!("selected extra fields: {:?}", selection.names());
+
     if should_use_in_memory(processing_size, max_memory_bytes) {
         log::info!("Using in-memory workflow");
-        in_memory_workflow(input_files, &args, &output_path)?;
+        in_memory_workflow(input_files, &args, &output_path, selection)?;
     } else {
         log::info!("Using external sort workflow");
-        external_sort_workflow(input_files, &args, &output_path)?;
+        external_sort_workflow(input_files, &args, &output_path, selection)?;
     }
 
     log::info!("Elapsed: {:?}", start.elapsed());
@@ -1408,6 +1668,7 @@ mod tests {
         let run_a = run_dir.path().join("run_a.bin");
         let run_b = run_dir.path().join("run_b.bin");
 
+        let selection = AttributeSelection::default();
         write_run_file(
             &run_a,
             &[
@@ -1420,6 +1681,7 @@ mod tests {
                     CompactPoint::from(point(4.0, 4.0, 4.0)),
                 ),
             ],
+            &selection,
         )
         .unwrap();
         write_run_file(
@@ -1434,10 +1696,17 @@ mod tests {
                     CompactPoint::from(point(3.0, 3.0, 3.0)),
                 ),
             ],
+            &selection,
         )
         .unwrap();
 
-        merge_shard_run_files(vec![run_a.clone(), run_b.clone()], tile_dir.path(), true).unwrap();
+        merge_shard_run_files(
+            vec![run_a.clone(), run_b.clone()],
+            tile_dir.path(),
+            true,
+            selection,
+        )
+        .unwrap();
 
         let tile_a_points = read_points_from_tile(
             &tile_dir
@@ -1456,6 +1725,193 @@ mod tests {
         assert_eq!(tile_b_points.len(), 1);
         assert!(!run_a.exists());
         assert!(!run_b.exists());
+    }
+
+    #[test]
+    fn compact_point_round_trip_preserves_attributes() {
+        let original = Point {
+            x: 100.0,
+            y: 200.0,
+            z: 300.0,
+            color: Color {
+                r: 1000,
+                g: 2000,
+                b: 3000,
+            },
+            attributes: PointAttributes {
+                intensity: Some(65000),
+                return_number: Some(3),
+                classification: Some(7),
+                scanner_channel: Some(2),
+                scan_angle: Some(-12.5),
+                user_data: Some(21),
+                point_source_id: Some(1234),
+                gps_time: Some(9876.5),
+            },
+        };
+
+        let selection = AttributeSelection {
+            intensity: true,
+            return_number: true,
+            classification: true,
+            scanner_channel: true,
+            scan_angle: true,
+            user_data: true,
+            point_source_id: true,
+            gps_time: true,
+        };
+        let restored = CompactPoint::from(original.clone()).into_point(&selection);
+        assert_eq!(restored.x, original.x);
+        assert_eq!(restored.y, original.y);
+        assert_eq!(restored.z, original.z);
+        assert_eq!(restored.color.r, original.color.r);
+        assert_eq!(restored.color.g, original.color.g);
+        assert_eq!(restored.color.b, original.color.b);
+        assert_eq!(restored.attributes.intensity, original.attributes.intensity);
+        assert_eq!(
+            restored.attributes.return_number,
+            original.attributes.return_number
+        );
+        assert_eq!(
+            restored.attributes.classification,
+            original.attributes.classification
+        );
+        assert_eq!(
+            restored.attributes.scanner_channel,
+            original.attributes.scanner_channel
+        );
+        assert_eq!(
+            restored.attributes.scan_angle,
+            original.attributes.scan_angle
+        );
+        assert_eq!(restored.attributes.user_data, original.attributes.user_data);
+        assert_eq!(
+            restored.attributes.point_source_id,
+            original.attributes.point_source_id
+        );
+        assert_eq!(restored.attributes.gps_time, original.attributes.gps_time);
+    }
+
+    #[test]
+    fn run_file_round_trip_preserves_selected_attributes() {
+        let dir = tempdir().unwrap();
+        let path = dir.path().join("run.bin");
+
+        let attrs = PointAttributes {
+            intensity: Some(65000),
+            return_number: Some(3),
+            classification: Some(7),
+            scanner_channel: Some(2),
+            scan_angle: Some(-12.5),
+            user_data: Some(21),
+            point_source_id: Some(1234),
+            gps_time: Some(9876.5),
+        };
+
+        let mut a = point(1.0, 2.0, 3.0);
+        a.attributes = attrs.clone();
+        let mut b = point(4.0, 5.0, 6.0);
+        b.attributes = attrs.clone();
+        let mut c = point(7.0, 8.0, 9.0);
+        c.attributes = attrs.clone();
+
+        let originals = [a, b, c];
+        let records: Vec<(SortKey, CompactPoint)> = originals
+            .iter()
+            .enumerate()
+            .map(|(i, p)| (SortKey { tile_id: i as u64 }, CompactPoint::from(p.clone())))
+            .collect();
+
+        let selection = AttributeSelection {
+            intensity: true,
+            return_number: true,
+            classification: true,
+            scanner_channel: true,
+            scan_angle: true,
+            user_data: true,
+            point_source_id: true,
+            gps_time: true,
+        };
+        write_run_file(&path, &records, &selection).unwrap();
+
+        let mut reader = RunFileReader::open(path, selection).unwrap();
+        for (i, original) in originals.iter().enumerate() {
+            let (key, compact) = reader.next_record().unwrap().unwrap();
+            assert_eq!(key.tile_id, i as u64);
+            let restored = compact.into_point(&selection);
+            assert_eq!(restored.x, original.x);
+            assert_eq!(restored.y, original.y);
+            assert_eq!(restored.z, original.z);
+            assert_eq!(restored.attributes.intensity, original.attributes.intensity);
+            assert_eq!(
+                restored.attributes.return_number,
+                original.attributes.return_number
+            );
+            assert_eq!(
+                restored.attributes.classification,
+                original.attributes.classification
+            );
+            assert_eq!(
+                restored.attributes.scanner_channel,
+                original.attributes.scanner_channel
+            );
+            assert_eq!(
+                restored.attributes.scan_angle,
+                original.attributes.scan_angle
+            );
+            assert_eq!(restored.attributes.user_data, original.attributes.user_data);
+            assert_eq!(
+                restored.attributes.point_source_id,
+                original.attributes.point_source_id
+            );
+            assert_eq!(restored.attributes.gps_time, original.attributes.gps_time);
+        }
+        assert!(reader.next_record().unwrap().is_none());
+    }
+
+    #[test]
+    fn run_file_stays_aligned_when_selected_attribute_missing_on_some_points() {
+        // Regression: a selected attribute (`gps_time`) is absent on some points
+        // (e.g. a LAS format without GPS time, or a blank CSV cell). With the
+        // fixed, selection-driven record layout every record is the same size,
+        // so reads must stay in sync and reconstruct all points.
+        let dir = tempdir().unwrap();
+        let path = dir.path().join("run.bin");
+
+        let selection = AttributeSelection {
+            gps_time: true,
+            ..Default::default()
+        };
+
+        let mut with_gps = point(1.0, 2.0, 3.0);
+        with_gps.attributes.gps_time = Some(42.5);
+        let mut without_gps = point(4.0, 5.0, 6.0);
+        without_gps.attributes.gps_time = None;
+
+        let originals = [with_gps, without_gps.clone(), without_gps];
+        let records: Vec<(SortKey, CompactPoint)> = originals
+            .iter()
+            .enumerate()
+            .map(|(i, p)| (SortKey { tile_id: i as u64 }, CompactPoint::from(p.clone())))
+            .collect();
+
+        write_run_file(&path, &records, &selection).unwrap();
+
+        let mut reader = RunFileReader::open(path, selection).unwrap();
+        let mut read_back = Vec::new();
+        while let Some((key, compact)) = reader.next_record().unwrap() {
+            read_back.push((key.tile_id, compact.into_point(&selection)));
+        }
+
+        assert_eq!(read_back.len(), 3);
+        assert_eq!(read_back[0].0, 0);
+        // Selected attribute is always present after round-trip; missing values
+        // default to 0.0 rather than desynchronizing the stream.
+        assert_eq!(read_back[0].1.attributes.gps_time, Some(42.5));
+        assert_eq!(read_back[1].1.attributes.gps_time, Some(0.0));
+        assert_eq!(read_back[2].1.attributes.gps_time, Some(0.0));
+        // Unselected attributes stay `None`.
+        assert_eq!(read_back[0].1.attributes.intensity, None);
     }
 
     fn cli_with_temp_dir(output: &Path, temp_dir: &Path) -> Cli {
@@ -1534,14 +1990,28 @@ mod tests {
         let csv_path = write_sample_csv(dir.path());
         let args = cli_with_temp_dir(&output, &temp_root);
 
-        in_memory_workflow(vec![csv_path.clone()], &args, &output).unwrap();
+        in_memory_workflow(
+            vec![csv_path.clone()],
+            &args,
+            &output,
+            AttributeSelection::default(),
+        )
+        .unwrap();
 
         assert!(output.join("tileset.json").exists());
         assert!(is_empty_dir(&temp_root));
 
         // A non-directory temp root must make the workflow fail, proving it is used.
         let args = cli_with_temp_dir(&output, &csv_path);
-        assert!(in_memory_workflow(vec![csv_path.clone()], &args, &output).is_err());
+        assert!(
+            in_memory_workflow(
+                vec![csv_path.clone()],
+                &args,
+                &output,
+                AttributeSelection::default(),
+            )
+            .is_err()
+        );
     }
 
     #[test]
@@ -1554,13 +2024,27 @@ mod tests {
         let csv_path = write_sample_csv(dir.path());
         let args = cli_with_temp_dir(&output, &temp_root);
 
-        external_sort_workflow(vec![csv_path.clone()], &args, &output).unwrap();
+        external_sort_workflow(
+            vec![csv_path.clone()],
+            &args,
+            &output,
+            AttributeSelection::default(),
+        )
+        .unwrap();
 
         assert!(output.join("tileset.json").exists());
         assert!(is_empty_dir(&temp_root));
 
         // A non-directory temp root must make the workflow fail, proving it is used.
         let args = cli_with_temp_dir(&output, &csv_path);
-        assert!(external_sort_workflow(vec![csv_path.clone()], &args, &output).is_err());
+        assert!(
+            external_sort_workflow(
+                vec![csv_path.clone()],
+                &args,
+                &output,
+                AttributeSelection::default(),
+            )
+            .is_err()
+        );
     }
 }

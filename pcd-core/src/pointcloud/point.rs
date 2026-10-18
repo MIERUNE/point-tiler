@@ -9,12 +9,93 @@ pub type EpsgCode = u16;
 pub struct PointAttributes {
     pub intensity: Option<u16>,
     pub return_number: Option<u8>,
-    pub classification: Option<String>,
+    pub classification: Option<u8>,
     pub scanner_channel: Option<u8>,
     pub scan_angle: Option<f32>,
     pub user_data: Option<u8>,
     pub point_source_id: Option<u16>,
     pub gps_time: Option<f64>,
+}
+
+/// Selects which optional point attributes are read and written to GLB metadata.
+/// A selected attribute must have a value on every point; readers and the GLB
+/// exporter report an error instead of filling in a default.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub struct AttributeSelection {
+    pub intensity: bool,
+    pub return_number: bool,
+    pub classification: bool,
+    pub scanner_channel: bool,
+    pub scan_angle: bool,
+    pub user_data: bool,
+    pub point_source_id: bool,
+    pub gps_time: bool,
+}
+
+impl AttributeSelection {
+    pub const ALL: Self = Self {
+        intensity: true,
+        return_number: true,
+        classification: true,
+        scanner_channel: true,
+        scan_angle: true,
+        user_data: true,
+        point_source_id: true,
+        gps_time: true,
+    };
+
+    /// Attribute names (as used for CSV columns and GLB property IDs) paired
+    /// with whether each one is selected.
+    pub fn fields(&self) -> [(&'static str, bool); 8] {
+        [
+            ("intensity", self.intensity),
+            ("return_number", self.return_number),
+            ("classification", self.classification),
+            ("scanner_channel", self.scanner_channel),
+            ("scan_angle", self.scan_angle),
+            ("user_data", self.user_data),
+            ("point_source_id", self.point_source_id),
+            ("gps_time", self.gps_time),
+        ]
+    }
+
+    /// Names of the selected attributes.
+    pub fn names(&self) -> Vec<&'static str> {
+        self.fields()
+            .into_iter()
+            .filter_map(|(name, selected)| selected.then_some(name))
+            .collect()
+    }
+
+    pub fn is_empty(&self) -> bool {
+        *self == Self::default()
+    }
+
+    fn combine(&self, other: &Self, op: impl Fn(bool, bool) -> bool) -> Self {
+        Self {
+            intensity: op(self.intensity, other.intensity),
+            return_number: op(self.return_number, other.return_number),
+            classification: op(self.classification, other.classification),
+            scanner_channel: op(self.scanner_channel, other.scanner_channel),
+            scan_angle: op(self.scan_angle, other.scan_angle),
+            user_data: op(self.user_data, other.user_data),
+            point_source_id: op(self.point_source_id, other.point_source_id),
+            gps_time: op(self.gps_time, other.gps_time),
+        }
+    }
+
+    pub fn intersection(&self, other: &Self) -> Self {
+        self.combine(other, |a, b| a && b)
+    }
+
+    pub fn union(&self, other: &Self) -> Self {
+        self.combine(other, |a, b| a || b)
+    }
+
+    /// Attributes selected in `self` but not in `other`.
+    pub fn difference(&self, other: &Self) -> Self {
+        self.combine(other, |a, b| a && !b)
+    }
 }
 
 #[derive(Debug, Clone, Default, Decode, Encode)]

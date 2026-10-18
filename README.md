@@ -76,6 +76,8 @@ After installing Rust, download this repository.
 | `--meshopt`            | Enable meshopt compression (`EXT_meshopt_compression`)                                                                                                     |
 | `--gzip-compress`      | Enable GZIP compression for output tiles                                                                                                                   |
 | `--disable-decimation` | Disable decimation during intermediate file generation and keep original point density                                                                     |
+| `--extra-fields`       | Comma-separated list of extra point attributes to read and embed as GLB metadata (e.g. `--extra-fields classification,intensity`). Valid values: `intensity`, `return-number`, `classification`, `scanner-channel`, `scan-angle`, `user-data`, `point-source-id`, `gps-time`. The flag may also be repeated. |
+| `--all-extra-fields`   | Read and embed every supported extra point attribute that all input files contain. Overrides `--extra-fields`. When neither flag is set, no extra attributes are included. |
 | `--temp-dir`           | Existing directory for temporary intermediate files (default: the system temp directory)                                                                   |
 
 ### Example
@@ -91,7 +93,8 @@ ptiler --input app/examples/data/sample.las \
     --threads 8 \
     --quantize \
     --meshopt \
-    --gzip-compress
+    --gzip-compress \
+    --extra-fields classification,intensity
 ```
 
 ### Benchmark
@@ -142,7 +145,28 @@ By default, intermediate files are written to the system temp directory (`TMPDIR
 
 ### Attributes
 
-At present, 3D Tiles output uses only XYZ and RGB. Other point attributes such as intensity, return number, classification, scan angle, point source ID, and GPS time are ignored during GLB generation.
+3D Tiles output always includes XYZ/RGB. Additional per-point attributes are opt-in via `--extra-fields` (or `--all-extra-fields`) and, when selected, are embedded as metadata:
+- intensity
+- return number
+- classification
+- scanner channel
+- scan angle
+- user data
+- point source ID
+- GPS time
+
+If neither flag is set, no extra attributes are included. Metadata is encoded in GLB using `EXT_structural_metadata` + `EXT_mesh_features`.
+
+A selected attribute must have a value for every point; missing values are never filled with `0`.
+- With `--extra-fields`, conversion fails if an input file does not contain a selected attribute (a LAS point format without the field, or a CSV without the column), or if a CSV cell is blank.
+- With `--all-extra-fields`, only the attributes contained in every input file are embedded. GPS time is absent from LAS point formats 0 and 2, and the scanner channel exists only in point formats 6-10. Conversion fails if an attribute exists in only some of the input files; use `--extra-fields` to select the attributes they share.
+- Invalid values (non-numeric values, NaN or infinity, fractional or out-of-range integers) also make the conversion fail.
+
+`scan_angle` is embedded in degrees. For LAS point formats 6-10 it is the stored value multiplied by 0.006.
+
+The following LAS attributes are not supported and are not included in the output: number of returns, the synthetic, key-point, withheld and overlap flags, scan direction flag, edge of flight line, NIR, waveform data, and Extra Bytes. For point formats 0-5, the overlap classification code 12 is kept as classification 12.
+
+For point formats 6-10, classification 12 (reserved in LAS 1.4) is read by the `las` crate as classification 1 with the overlap flag, so it is output as classification 1.
 
 ### Coordinate Systems
 
@@ -167,9 +191,11 @@ The output tiles are thinned out so that one point is stored in a voxel grid of 
 
 It supports .csv and .txt file extensions.
 
-In CSV format, any columns other than XYZRGB will be ignored.
-Also, the column names must be "x", "y", "z" and "r", "g", "b" or "red", "green", "blue".
+In CSV format, `x`, `y`, and `z` are required.
+Color columns are optional (`r,g,b` or `red,green,blue`) and default to white if omitted.
+Additional optional attribute columns are supported: `intensity`, `return_number`, `classification`, `scanner_channel`, `scan_angle`, `user_data`, `point_source_id`, `gps_time`.
 (The case of the letters does not matter.)
+Integer attributes (all except `scan_angle` and `gps_time`) must be whole numbers such as `2` or `2.0`; values such as `2.7` are rejected.
 
 For example, the following data is valid.
 
