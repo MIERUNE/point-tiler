@@ -1,5 +1,6 @@
 name: Release
 on:
+  workflow_dispatch:
   release:
     types: [published]
 
@@ -101,3 +102,26 @@ jobs:
           asset_path: ./target/${{ matrix.config.target }}/release-lto/${{ env.PROJECT_NAME }}-${{ github.ref_name }}-${{ matrix.config.target }}${{ matrix.config.extension }}
           asset_name: ${{ env.PROJECT_NAME }}-${{ github.ref_name }}-${{ matrix.config.target }}${{ matrix.config.extension }}
           asset_content_type: application/octet-stream
+  docker:
+    runs-on: ubuntu-latest
+    permissions:
+      packages: write
+      contents: read
+    steps:
+      - uses: actions/checkout@v6
+      - id: build
+        uses: redhat-actions/buildah-build@v3
+        with:
+          image: ${{ github.event.repository.name }}
+          tags: |
+            latest
+            ${{ github.event_name == 'release' && github.ref_name || github.sha }}
+
+          containerfiles: ./Dockerfile
+      - uses: redhat-actions/push-to-registry@v3
+        with:
+          image: ${{ steps.build.outputs.image }}
+          tags: ${{ steps.build.outputs.tags }}
+          registry: ghcr.io/${{ github.repository_owner }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
