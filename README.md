@@ -166,6 +166,8 @@ A selected attribute must have a value for every point; missing values are never
 
 The following LAS attributes are not supported and are not included in the output: number of returns, the synthetic, key-point, withheld and overlap flags, scan direction flag, edge of flight line, NIR, waveform data, and Extra Bytes. For point formats 0-5, the overlap classification code 12 is kept as classification 12.
 
+For point formats 6-10, classification 12 (reserved in LAS 1.4) is read by the `las` crate as classification 1 with the overlap flag, so it is output as classification 1.
+
 ### Coordinate Systems
 
 This tool uses the PROJ library for coordinate transformation, supporting any EPSG code.

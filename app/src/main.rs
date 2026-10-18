@@ -91,8 +91,9 @@ struct Cli {
     #[arg(long, value_enum, value_delimiter = ',', num_args = 1..)]
     extra_fields: Vec<ExtraField>,
 
-    /// Read and embed every supported extra point attribute that all input
-    /// files contain. Overrides `--extra-fields`.
+    /// Embed all supported extra point attributes shared by every input file.
+    /// Errors if any attribute exists in only some inputs; use `--extra-fields`
+    /// to select shared attributes. Overrides `--extra-fields`.
     #[arg(long)]
     all_extra_fields: bool,
 
