@@ -6,10 +6,15 @@ edition.workspace = true
 
 [dependencies]
 pcd-core = { path = "../pcd-core" }
-proj-sys = "0.27.0"
+proj = { workspace = true }
+
+# On Windows (MSVC), build PROJ and SQLite from source instead of linking a preinstalled PROJ.
+# The PROJ build needs the `sqlite3` executable on PATH to generate proj.db.
+[target.'cfg(target_env = "msvc")'.dependencies]
+proj = { workspace = true, features = ["bundled_proj_sqlite"] }
 
 [features]
-bundled-proj = ["proj-sys/bundled_proj"]
+bundled-proj = ["proj/bundled_proj"]
 
 [dev-dependencies]
 criterion = "0.8"

@@ -3,11 +3,6 @@ on:
   release:
     types: [published]
 
-env:
-  # proj v9.6.2 (At the time of writing, proj-sys aims for PROJ v9.6.x)
-  # cf. https://github.com/microsoft/vcpkg/commit/63bb67b3ec76131e6297104befb3afb1f6111bd8
-  VCPKG_REF: 6fa128f2b6e1dd260ebfb30fdb1c38a191369812
-
 jobs:
   release:
     runs-on: ${{ matrix.config.os }}
@@ -41,47 +36,10 @@ jobs:
           sudo apt-get update
           sudo apt-get install -y musl-tools
 
-      # We use vcpkg to install PROJ on Windows as well as having pkg-config available. As we can
-      # see, introducing vcpkg feels a bit overkill, but it seems this is the only established way.
-      # The current setup is based on SedonaDB's one (while this is not for Windows):
-      #   https://github.com/apache/sedona-db/blob/e51f5a59c057639c91798cc509df3c92331ae563/.github/workflows/rust.yml#L69-L103
-      #
-      # For reference, possible alternative ways are:
-      # - Use MSYS2 and install mingw-w64-ucrt-x86_64-proj (but this requires windows-gnu target
-      #   instead of windows-msvc).
-      # - Use proj-sys's bundled_proj feature. I feel this should work in theory because Windows GHA
-      #   runner has SQLite installed, but I couldn't find a way to make the build success.
-
-      - name: Clone vcpkg
-        uses: actions/checkout@v6
+      # PROJ is built from source on Windows; see coordinate-transformer/Cargo.toml.
+      - name: Install sqlite3 (Windows)
         if: runner.os == 'Windows'
-        with:
-          repository: microsoft/vcpkg
-          ref: ${{ env.VCPKG_REF }}
-          path: vcpkg
-
-      - name: Set up environment variables and bootstrap vcpkg
-        if: runner.os == 'Windows'
-        shell: pwsh
-        env:
-          VCPKG_ROOT: ${{ github.workspace }}/vcpkg
-        run: |
-          Set-Location vcpkg
-          .\bootstrap-vcpkg.bat
-          Set-Location ..
-
-          @"
-          VCPKG_ROOT=$env:VCPKG_ROOT
-          PATH=${env:VCPKG_ROOT}/downloads/tools/msys2/9272adbcaf19caef/mingw64/bin/;${env:VCPKG_ROOT}/installed/x64-windows-static/bin/;${env:PATH}
-          PKG_CONFIG_SYSROOT_DIR=${env:VCPKG_ROOT}/downloads/tools/msys2/9272adbcaf19caef/mingw64/
-          PKG_CONFIG_PATH=${env:VCPKG_ROOT}/installed/x64-windows-static/lib/pkgconfig/
-          "@ | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
-
-      - name: Install vcpkg dependencies
-        if: runner.os == 'Windows'
-        shell: pwsh
-        run: |
-          ./vcpkg/vcpkg.exe install proj:x64-windows-static
+        run: choco install sqlite --no-progress
 
       - name: Build
         run: cargo build --profile release-lto --package app --target ${{ matrix.config.target }}

@@ -349,7 +349,7 @@ version = "0.0.10"
 dependencies = [
  "criterion",
  "pcd-core",
- "proj-sys",
+ "proj",
 ]
 
 [[package]]
@@ -894,10 +894,11 @@ dependencies = [
 
 [[package]]
 name = "libsqlite3-sys"
-version = "0.35.0"
+version = "0.39.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "133c182a6a2c87864fe97778797e46c7e999672690dc9fa3ee8e241aa4a9c13f"
+checksum = "14a5f01b87b92705d07b433c06f96cbc764637d81a0bffb5734ce17cf0f9a2b3"
 dependencies = [
+ "cc",
  "pkg-config",
  "vcpkg",
 ]
@@ -1170,10 +1171,20 @@ dependencies = [
 ]
 
 [[package]]
+name = "proj"
+version = "0.32.0"
+source = "git+https://github.com/georust/proj?rev=49fbffb81260baf9f6c489fe1f7ba29c6c7ba8ee#49fbffb81260baf9f6c489fe1f7ba29c6c7ba8ee"
+dependencies = [
+ "libc",
+ "num-traits",
+ "proj-sys",
+ "thiserror 2.0.18",
+]
+
+[[package]]
 name = "proj-sys"
-version = "0.27.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "48ffa255a853264169516c9fc21f524446aca5b091daab6052f2a9b3e5e90359"
+version = "0.28.0"
+source = "git+https://github.com/georust/proj?rev=49fbffb81260baf9f6c489fe1f7ba29c6c7ba8ee#49fbffb81260baf9f6c489fe1f7ba29c6c7ba8ee"
 dependencies = [
  "cmake",
  "flate2",
